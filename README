@@ -1,0 +1,34 @@
+wubi-move.sh
+============
+
+This is a bash script that migrates a Wubi install to a partition. The script is based on the wubi-move-to-partition script from Agostino Russo taken the Wubi Guide (https://wiki.ubuntu.com/WubiGuide).
+
+This version updates the wubi-move-to-partition script to correct a few problems and deprecated commands, as well as to update it to support Grub2. This means it only works on Wubi installs from 9.10 and later. This does not include Wubi installs that were migrated to 9.10 or later from a prior release, which still use grub-legacy.
+
+Usage: sudo bash wubi-move.sh [OPTION] target_partition [swap_partition]
+       e.g. sudo bash wubi-move.sh /dev/sda5 /dev/sda6
+
+Migrate a wubi ubuntu install (9.10 or greater) to partition
+  -h, --help              print this message and exit
+  -v, --version           print the version information and exit
+  --no-bootloader         do not install the grub2 bootloader
+  -y, --assume-yes        assume yes to all prompts
+
+Assumptions: 
+  1. grub2 is installed - if the script detects grub-legacy it will exit
+  2. the grub2 bootloader will be installed to /dev/sdX where /dev/sdXY
+     is the target partition, unless --no-bootloader is specified.
+     If -y or --assume-yes is not specified you will still be prompted
+     whether to install the grub bootloader.
+  3. the target partition file system will be formatted as ext4
+
+Notes:
+  If you install the grub2 bootloader then the grub menu from your new partition
+  will be presented at boot. Not the windows menu.
+  If you do not install the grub2 bootloader, then you will still be able to 
+  boot the new partition using the wubi menu. In this case, make sure you
+  install the grub2 bootloader before uninstalling wubi.
+  To install the bootloader, boot your new installation and run: 
+       sudo grub-install /dev/sdX 
+  (where X is the drive you boot from e.g. /dev/sda)
+
