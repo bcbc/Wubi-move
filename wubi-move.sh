@@ -41,7 +41,7 @@ dev=                        # target device for migration
 swapdev=                    # swap device for migration
 
 # Literals 
-version=2.0                 # Script version
+version=2.0.1               # Script version
 target=/tmp/wubitarget      # target device mountpoint
 root_mount=/tmp/rootdisk    # root.disk mountpoint
 
@@ -52,9 +52,10 @@ install_grub=false          # Must the grub2 bootloader be installed?
 wubi_install=true           # Is this a Wubi install migration?
 internet_connection=false   # Is there an internet connection present?
 suppress_chroot_output=true # Default - suppress output of chroot commands
+grub_common_exists=true     # Check for grub-common (not on 8.04)
 
 # Working variables
-fs=ext4                     # Default file system if supported - else ext3
+fs=ext4                     # Default file system - else ext3 if detected on install being migrated
 rc=                         # Preserve return code
 root="/"                    # Default root of the install being migrated
 host_mountpoint=            # Host mountpoint for Wubi install
@@ -63,7 +64,6 @@ loop_file=                  # Root.disk for running Wubi install
 loop_device=                # Loop device for mounted root.disk
 mtpt=                       # Mount point determination working variable
 awkscript=                  # Contains AWK script
-grub_common_exists=true     # Check for grub-common (not on 8.04)
 target_size=                # size of target partition
 install_size=               # size of current install
 
@@ -105,8 +105,7 @@ Assumptions:
      on releases 9.10 and greater. It will also prompt for the bootloader
      install drive/partition.
   5. The target partition file system will be formatted as ext4 (default) 
-     or ext3 if detected on the install being migrated. The script will not
-     modify the partition type i.e. set it to 83 (linux)
+     or ext3 if detected on the install being migrated.
   6. An install with separate /home, /boot, or /usr partitions or virtual
      disks will be merged when it is migrated onto the single target 
      partition and fstab modified accordingly.
@@ -313,6 +312,19 @@ root_disk_migration ()
         fi
         exit_script 1
     fi
+
+# make sure the architecture matches
+    if [ $(file /bin/bash | grep '32-bit' | wc -l) -eq 1 ]; then
+      if [ $(file "$root_mount"/bin/bash | grep '64-bit' | wc -l) -eq 1 ]; then
+        echo "$0: Current Ubuntu architecture is 32-bit but root.disk contains a 64-bit install."
+        echo "$0: You need to migrate from a 64-bit environment"
+        exit_script 1
+      fi
+    elif [ $(file "$root_mount"/bin/bash | grep '32-bit' | wc -l) -eq 1 ]; then
+      echo "$0: Current Ubuntu architecture is 64-bit but root.disk contains a 32-bit install."
+      echo "$0: You need to migrate from a 32-bit environment"
+      exit_script 1
+    fi
 }
 
 ### Determine whether this is a wubi install or not
@@ -411,6 +423,36 @@ pre_checks ()
         echo "$0: target_partition ("$dev") must be a valid partition."
         exit_script 1
     fi
+
+# determine drive of target partition - make sure the user hasn't 
+# specified the drive instead of the partition
+    disk=${dev%%[0-9]*}
+    if [ "$disk" = "$dev" ]; then
+        echo "$0: target_partition "$dev" is a drive, not a partition."
+        exit_script 1
+    fi
+    if [ $(fdisk -l | grep "$dev[ \t]" | grep "[ \t]5[ \t]" | grep "Extended" | wc -l) -eq 1 ]; then
+        echo "$0: target_partition "$dev" is an Extended partition."
+        exit_script 1
+    fi
+    if [ $(fdisk -l | grep "$dev[ \t]" | grep "[ \t]f[ \t]" | grep "W95 Ext'd (LBA)" | wc -l) -eq 1 ]; then
+        echo "$0: target_partition "$dev" is an Extended partition."
+        exit_script 1
+    fi
+    if [ $(fdisk -l | grep "$dev[ \t]" | grep "[ \t]85[ \t]" | grep "Linux extended" | wc -l) -eq 1 ]; then
+        echo "$0: target_partition "$dev" is an Extended partition."
+        exit_script 1
+    fi
+# hard check - partition type must be "83 - Linux" 
+# previous version of script will happily use e.g. an ntfs partition in which case you end up
+# with a partition type ntfs and a file system ext3/4. For future sanity and to avoid confusion
+# the partition should be prepared correctly beforehand. My own attempts to modify it to 83 in the
+# scripts with sfdisk have proven to be dangerous.
+    if [ $(fdisk -l | grep "$dev[ \t]" | grep "[ \t]83[ \t]" | grep "Linux" | wc -l) -eq 0 ]; then
+        echo "$0: target_partition "$dev" must be type 83 - Linux."
+        exit_script 1
+   fi
+
     if [ $(mount | grep "$dev"'\ ' | wc -l) -ne 0 ]; then
         echo "$0: "$dev" is mounted - please unmount and try again"
         exit_script 1
@@ -421,9 +463,16 @@ pre_checks ()
         echo "$0: swapdevice ("$swapdev") is not a block device."            
         exit_script 1
     fi
+# swap partition type is '82 - Linux swap / Solaris'
+# Blkid will report type "swap" or "swsuspend", the latter if
+# the swap partition contains a hibernated image.
     if [ -b "$swapdev" ]; then
-        if [ "$(blkid -c /dev/null -o value -s TYPE "$swapdev")" != "swap" ]; then
+        if [ $(fdisk -l | grep "$swapdev[ \t]" | grep "[ \t]82[ \t]" | grep "Linux swap" | wc -l) -eq 0 ]; then
             echo "$0: "$swapdev" is not a swap partition"
+            exit_script 1
+        fi
+        if [ "$(blkid -c /dev/null -o value -s TYPE "$swapdev")" = "swsuspend" ]; then
+            echo "$0: "$swapdev" contains a hibernated image"
             exit_script 1
         fi
     fi
@@ -478,9 +527,6 @@ pre_checks ()
     if [ "$?" -eq 0 ]; then         
         internet_connection=true
     fi
-
-# determine drive of target partition
-    disk=${dev%%[0-9]*}
 
 # If this isn't a root.disk install, check
 # which version of grub is installed.
@@ -723,7 +769,7 @@ create_swap ()
     if [ -b "$swapdev" ]; then
         if [ "$no_mkswap" = "false" ]; then
           echo "$0: Creating swap..."
-          mkswap $swapdev > /dev/null 2>&1
+          mkswap $swapdev > /dev/null
           if [ "$?" != 0 ]; then
             echo "$0: Command mkswap on "$swapdev" failed"
             echo "$0: Migration will continue without swap"
