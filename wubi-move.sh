@@ -39,11 +39,15 @@ root_disk=                  # path and name of root.disk file
 debug=false                 # Output debug information
 dev=                        # target device for migration
 swapdev=                    # swap device for migration
+diskspath=                  # path to find virtual disks
+rootdiskpath=               # path to root.disk file
 
 # Literals 
 version=2.0.1               # Script version
 target=/tmp/wubitarget      # target device mountpoint
 root_mount=/tmp/rootdisk    # root.disk mountpoint
+wubi_diskspath=/host/ubuntu/disks # path to disks with Wubi
+mint_diskspath=/host/mint/disks   # path to disks on Mint4win
 
 # Bools 
 formatted_dev=false         # Has the target been formatted?
@@ -53,6 +57,7 @@ wubi_install=true           # Is this a Wubi install migration?
 internet_connection=false   # Is there an internet connection present?
 suppress_chroot_output=true # Default - suppress output of chroot commands
 grub_common_exists=true     # Check for grub-common (not on 8.04)
+mint=false                  # mint4win
 
 # Working variables
 fs=ext4                     # Default file system - else ext3 if detected on install being migrated
@@ -211,8 +216,18 @@ exit_script ()
 # Depending on when the exception is encountered there may be nothing to cleanup
 
 # If the migration is from a named root.disk, unmount if required,
-# and then delete mountpoint.
+# and then delete mountpoint. Also check home.disk and usr.disk
     if [ ! -z "$root_disk" ]; then
+      if [ $(mount | grep "$root_mount"/home'\ ' | wc -l) -ne 0 ]; then
+        umount "$root_mount"/home > /dev/null 2>&1
+        sleep 1 
+        [ -d "$root_mount"/home ] && rmdir "$root_mount"/home > /dev/null 2>&1
+      fi
+      if [ $(mount | grep "$root_mount"/usr'\ ' | wc -l) -ne 0 ]; then
+        umount "$root_mount"/usr > /dev/null 2>&1
+        sleep 1 
+        [ -d "$root_mount"/usr ] && rmdir "$root_mount"/usr > /dev/null 2>&1
+      fi
       if [ $(mount | grep "$root_mount"'\ ' | wc -l) -ne 0 ]; then
         umount "$root_mount" > /dev/null 2>&1
         sleep 1 
@@ -243,6 +258,78 @@ exit_script ()
     exit $1
 }
 
+# Check that a virtual disk is not mounted
+check_disk_mount ()
+{
+# this code goes through each line in /proc/mounts
+# and compares the first column ($DEV) to "/dev/loop*"
+# If it finds an existing loop mount it retrieves the
+# associated filename and compares it to the root.disk
+    while read DEV MTPT FSTYPE OPTS REST; do
+        case "$DEV" in
+          /dev/loop/*|/dev/loop[0-9])
+            loop_file=`losetup "$DEV" | sed -e "s/^[^(]*(\([^)]\+\)).*/\1/"`
+            if  [ "$loop_file" = "$1" ]; then
+                echo "$0: "$1" is mounted - please unmount and try again"
+                exit_script 1
+            fi
+          ;;
+        esac
+    done < /proc/mounts
+    if 
+}
+
+# mount a virtual disk - exit if it fails
+mount_virtual_disk()
+{
+    if mount -o loop "$1" "$2" 2> /tmp/wubi-move-error; then
+        true #nothing yet
+    else
+        echo "$0: "$1" could not be mounted"
+# Check for 'file system ext4 unknown' message e.g. if you boot an
+# 8.04 disk and try to migrate a current ext4 root.disk 
+        if [ $(cat /tmp/wubi-move-error | grep "unknown filesystem type 'ext4'" | wc -l) -eq 1 ]; then 
+            echo "$0: The live environment you are using doesn't support"
+            echo "$0: the virtual disks ext4 file system. Try using an"
+            echo "$0: Ubuntu CD containing release 9.10 or later."
+        else
+            # some other issue - output message
+            echo "$0: Error is: $(cat /tmp/wubi-move-error)"        
+            echo "$0: Check that the path/name is correct and the"
+            echo "$0: root.disk contains a working Wubi install."
+        fi
+        exit_script 1
+    fi
+}
+
+check_fstab ()
+{
+# this code goes through each line in /etc/fstab
+# and makes sure the virtual disks are not mounted
+# and mountable. It assumes that /host/ubuntu/disks/xxx.disk
+# means that xxx.disk is in the same location as the current 
+# root.disk that whose /etc/fstab contains xxx.disk
+    while read DEV MTPT TYPE OPTS DMP PASS; do
+        case "$MTPT" in 
+          /home|/usr)
+            disks_path=`echo $DEV | sed -e "s/\(^\/host\/ubuntu\/disks\/\)\(.*\)/\1/"`
+            if [ "$disks_path" = "$ubuntu_diskspath" ]; then          
+                virtual_disk=`echo $DEV | sed -e "s/\(^\/host\/ubuntu\/disks\/\)\(.*\)/\2/"`
+                check_disk_mount("$virtual_disk")
+                if [ "$MTPT" = "/home" ]; then 
+                   mkdir "$root_mount"/home
+                   mount_virtual_disk($"rootdiskpath"$virtual_disk "$root_mount"/home)
+                else
+                   mkdir "$root_mount"/usr
+                   mount_virtual_disk($"rootdiskpath"$virtual_disk "$root_mount"/usr)
+                fi
+          ;;
+        esac
+    done < "$root_mount"/etc/fstab
+}
+
+
+
 # Attempt to migrate from a root.disk. The root.disk must be a fully
 # contained Ubuntu install with /, /boot, /home, /usr (note this excludes
 # grub-legacy Ubuntu since /boot is on the windows partition).
@@ -261,55 +348,37 @@ root_disk_migration ()
     fi
     install_grub=true
 
-# make sure the root.disk is not already mounted
-# this code goes through each line in /proc/mounts
-# and compares the first column ($DEV) to "/dev/loop*"
-# If it finds an existing loop mount it retrieves the
-# associated filename and compares it to the root.disk
-    while read DEV MTPT FSTYPE OPTS REST; do
-        case "$DEV" in
-          /dev/loop/*|/dev/loop[0-9])
-            loop_file=`losetup "$DEV" | sed -e "s/^[^(]*(\([^)]\+\)).*/\1/"`
-            if  [ "$loop_file" = "$root_disk" ]; then
-                echo "$0: "$root_disk" is mounted - please unmount and try again"
-                exit_script 1
-            fi
-          ;;
-        esac
-    done < /proc/mounts
 
-# mount the root.disk and do rudimentary check to ensure that the
+# mount the root.disk and check it is a fully contained install
+# or else the /etc/fstab links to additional virtual disks and 
+# these can be validated.
 # /usr, /home, and /boot are present. If this is a grub legacy
 # migration /boot is always separate so it's not possible to migrate 
     mkdir -p $root_mount
-    if mount -o loop "$root_disk" "$root_mount" 2> /tmp/wubi-move-error; then
-        if [ $(ls -1 "$root_mount"/usr | wc -l) -eq 0 ] || \
-           [ $(ls -1 "$root_mount"/home | wc -l) -eq 0 ] || \
-           [ $(ls -1 "$root_mount"/boot | wc -l) -eq 0 ]; then
-            echo "$0: Root disk ("$root_disk") missing required directories."
-            echo "$0: If the original release was prior to 9.10 then it can"
-            echo "$0: not be migrated from the root.disk."
-            exit_script 1
-        fi
-        # override root for the copy command.
-        root="$root_mount"/
-        # determine size of install
-        awkscript="\$6==\""$root_mount"\" {sum += \$3} END {print sum}"
-        install_size=$(df | awk "$awkscript")
-    else
-        echo "$0: "$root_disk" could not be mounted"
-# Check for 'file system ext4 unknown' message e.g. if you boot an
-# 8.04 disk and try to migrate a current ext4 root.disk 
-        if [ $(cat /tmp/wubi-move-error | grep "unknown filesystem type 'ext4'" | wc -l) -eq 1 ]; then 
-            echo "$0: The live environment you are using doesn't support"
-            echo "$0: the root.disk's ext4 file system. Try using an"
-            echo "$0: Ubuntu CD containing release 9.10 or later."
-        else
-            # some other issue - output message
-            echo "$0: Error is: $(cat /tmp/wubi-move-error)"        
-            echo "$0: Check that the path/name is correct and the"
-            echo "$0: root.disk contains a working Wubi install."
-        fi
+
+# make sure the root.disk is not already mounted
+    check_disk_mount("$root_disk")
+# mount it - fail if the mount fails
+    mount_virtual_disk("$root_disk" "$root_mount")
+    rootdiskpath=`echo "$root_disk" | sed -e "s/\(^.*\)root.disk/\1/"`
+# override root for the copy command.
+    root="$root_mount"/
+# read the /etc/fstab and load a list of virtual disks, make sure they are there, and unmounted.
+# create mountpoints for /usr and /home if they exist and mount them
+    check_fstab    
+    
+# determine size of install
+#TODO check if this picks up the total size or just the / root.disk
+    awkscript="\$6==\""$root_mount"\" || \$6==\""$root_mount"/usr\" || \$6==\""$root_mount"/home\" {sum += \$3} END {print sum}"
+    install_size=$(df | awk "$awkscript")
+
+# check we have all the required files
+    if [ $(ls -1 "$root_mount"/usr | wc -l) -eq 0 ] || \
+       [ $(ls -1 "$root_mount"/home | wc -l) -eq 0 ] || \
+       [ $(ls -1 "$root_mount"/boot | wc -l) -eq 0 ]; then
+        echo "$0: Root disk ("$root_disk") missing required directories."
+        echo "$0: If the original release was prior to 9.10 then it can"
+        echo "$0: not be migrated from the root.disk."
         exit_script 1
     fi
 
