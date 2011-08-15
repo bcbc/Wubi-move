@@ -273,7 +273,6 @@ check_disk_mount ()
           ;;
         esac
     done < /proc/mounts
-    if 
 }
 
 # mount a virtual disk - exit if it fails
@@ -312,14 +311,15 @@ check_fstab ()
             disks_path=`echo $DEV | sed -e "s/\(^\/host\/ubuntu\/disks\/\)\(.*\)/\1/"`
             if [ "$disks_path" = "/host/ubuntu/disks/" ]; then          
                 virtual_disk=`echo $DEV | sed -e "s/\(^\/host\/ubuntu\/disks\/\)\(.*\)/\2/"`
-                check_disk_mount("$virtual_disk")
+                check_disk_mount "$virtual_disk"
                 if [ "$MTPT" = "/home" ]; then 
                    mkdir "$root_mount"/home
-                   mount_virtual_disk($"rootdiskpath"$virtual_disk "$root_mount"/home)
+                   mount_virtual_disk $"rootdiskpath"$virtual_disk "$root_mount"/home
                 else
                    mkdir "$root_mount"/usr
-                   mount_virtual_disk($"rootdiskpath"$virtual_disk "$root_mount"/usr)
+                   mount_virtual_disk $"rootdiskpath"$virtual_disk "$root_mount"/usr
                 fi
+            fi    
           ;;
         esac
     done < "$root_mount"/etc/fstab
@@ -354,10 +354,10 @@ root_disk_migration ()
     mkdir -p $root_mount
 
 # make sure the root.disk is not already mounted
-    check_disk_mount("$root_disk")
+    check_disk_mount "$root_disk"
 
 # mount it - fail if the mount fails
-    mount_virtual_disk("$root_disk" "$root_mount")
+    mount_virtual_disk "$root_disk" "$root_mount"
 
 # override root for the copy command.
     root="$root_mount"/
