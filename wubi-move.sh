@@ -305,19 +305,19 @@ check_fstab ()
 # and mountable. It assumes that /host/ubuntu/disks/xxx.disk
 # means that xxx.disk is in the same location as the current 
 # root.disk that whose /etc/fstab contains xxx.disk
-    while read DEV MTPT TYPE OPTS DMP PASS; do
-        case "$MTPT" in 
+    while read fDEV fMTPT fTYPE fOPTS fDMP fPASS; do
+        case "$fMTPT" in 
           /home|/usr)
-            disks_path=`echo $DEV | sed -e "s/\(^\/host\/ubuntu\/disks\/\)\(.*\)/\1/"`
+            disks_path=`echo $fDEV | sed -e "s/\(^\/host\/ubuntu\/disks\/\)\(.*\)/\1/"`
             if [ "$disks_path" = "/host/ubuntu/disks/" ]; then          
-                virtual_disk=`echo $DEV | sed -e "s/\(^\/host\/ubuntu\/disks\/\)\(.*\)/\2/"`
-                check_disk_mount "$virtual_disk"
-                if [ "$MTPT" = "/home" ]; then 
+                virtual_disk=`echo $fDEV | sed -e "s/\(^\/host\/ubuntu\/disks\/\)\(.*\)/\2/"`
+                check_disk_mount "$fDEV"
+                if [ "$fMTPT" = "/home" ]; then 
                    mkdir "$root_mount"/home
-                   mount_virtual_disk $"rootdiskpath"$virtual_disk "$root_mount"/home
+                   mount_virtual_disk "$rootdiskpath"$virtual_disk "$root_mount"/home
                 else
                    mkdir "$root_mount"/usr
-                   mount_virtual_disk $"rootdiskpath"$virtual_disk "$root_mount"/usr
+                   mount_virtual_disk "$rootdiskpath"$virtual_disk "$root_mount"/usr
                 fi
             fi    
           ;;
