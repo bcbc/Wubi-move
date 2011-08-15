@@ -39,15 +39,12 @@ root_disk=                  # path and name of root.disk file
 debug=false                 # Output debug information
 dev=                        # target device for migration
 swapdev=                    # swap device for migration
-diskspath=                  # path to find virtual disks
 rootdiskpath=               # path to root.disk file
 
 # Literals 
 version=2.0.1               # Script version
 target=/tmp/wubitarget      # target device mountpoint
 root_mount=/tmp/rootdisk    # root.disk mountpoint
-wubi_diskspath=/host/ubuntu/disks # path to disks with Wubi
-mint_diskspath=/host/mint/disks   # path to disks on Mint4win
 
 # Bools 
 formatted_dev=false         # Has the target been formatted?
@@ -313,7 +310,7 @@ check_fstab ()
         case "$MTPT" in 
           /home|/usr)
             disks_path=`echo $DEV | sed -e "s/\(^\/host\/ubuntu\/disks\/\)\(.*\)/\1/"`
-            if [ "$disks_path" = "$ubuntu_diskspath" ]; then          
+            if [ "$disks_path" = "/host/ubuntu/disks/" ]; then          
                 virtual_disk=`echo $DEV | sed -e "s/\(^\/host\/ubuntu\/disks\/\)\(.*\)/\2/"`
                 check_disk_mount("$virtual_disk")
                 if [ "$MTPT" = "/home" ]; then 
@@ -358,21 +355,24 @@ root_disk_migration ()
 
 # make sure the root.disk is not already mounted
     check_disk_mount("$root_disk")
+
 # mount it - fail if the mount fails
     mount_virtual_disk("$root_disk" "$root_mount")
-    rootdiskpath=`echo "$root_disk" | sed -e "s/\(^.*\)root.disk/\1/"`
+
 # override root for the copy command.
     root="$root_mount"/
-# read the /etc/fstab and load a list of virtual disks, make sure they are there, and unmounted.
-# create mountpoints for /usr and /home if they exist and mount them
+
+# read the /etc/fstab and check for other virtual disks, make sure they are there, and unmounted.
+# Create mountpoints for /usr and /home if they exist and mount them
+    rootdiskpath=${root_disk%/*}/
     check_fstab    
     
 # determine size of install
-#TODO check if this picks up the total size or just the / root.disk
     awkscript="\$6==\""$root_mount"\" || \$6==\""$root_mount"/usr\" || \$6==\""$root_mount"/home\" {sum += \$3} END {print sum}"
     install_size=$(df | awk "$awkscript")
 
-# check we have all the required files
+# check we have all the required files - grub legacy won't work as
+# we never mount /boot separately
     if [ $(ls -1 "$root_mount"/usr | wc -l) -eq 0 ] || \
        [ $(ls -1 "$root_mount"/home | wc -l) -eq 0 ] || \
        [ $(ls -1 "$root_mount"/boot | wc -l) -eq 0 ]; then
