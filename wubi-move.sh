@@ -568,9 +568,9 @@ pre_checks ()
     fi
 
 # check for partitions mounted on 'unexpected' mountpoints. These aren't
-# included in the space check and causes the migration to run out of space
+# included in the space check and can cause the migration to run out of space
 # during the rsync copy. Mountpoints under /mnt or /media and of course
-# /boot, /usr, /home and /host are not a problem.
+# /boot, /usr, /home, /root, /tmp and /host are not a problem.
     mtpt=
     while read DEV MTPT FSTYPE OPTS REST; do
         case "$DEV" in
@@ -585,7 +585,7 @@ pre_checks ()
                 mtpt=$work
             done
             case $mtpt in
-            /mnt|/media|/host|/home|/usr|/boot)
+            /mnt|/media|/host|/home|/usr|/boot|/tmp|/root)
                 true #ok
                 ;;
             *)
