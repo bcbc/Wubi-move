@@ -5,11 +5,11 @@ This is a bash script that migrates a Wubi install to a partition. The script is
 
 The first version updated the wubi-move-to-partition script to correct a few problems and deprecated commands, as well as to update it to support Grub2. It only worked on Wubi installs from 9.10 and later.
 
-This version adds the following features:
+The current version adds the following features:
 1. Supports migration of a normal (non-wubi) Ubuntu install. This can be useful to create a working backup, move your installation between computers, or create a working copy to experiment with.
-2. Supports migration of a Wubi install from just the root.disk file (new option --root-disk= ). This can be performed from an Ubuntu live CD/USB or another Ubuntu install. The named root.disk must be a fully-contained, working Wubi install (this excludes grub-legacy Wubi where the /boot folder is always on the Windows partition).
+2. Supports migration of a Wubi install from just the root.disk file (option --root-disk= ). This can be performed from an Ubuntu live CD/USB or another Ubuntu install. The named root.disk must be a fully-contained, working Wubi install, or if there are separate virtual disks for /home and /usr these must be in the same directory as the root.disk. (This option does not support Wubi with grub-legacy i.e. original installed prior to the 9.10 release).
 3. It supports migration of a Wubi or Normal install that uses grub-legacy - however it will replace grub-legacy with Grub2 (only on the migrated install). It does not update the current install's menu.lst so it is recommended to always install the Grub2 bootloader (or modify menu.lst manually).
-4. It has a new option --shared-swap to be used if you will be sharing an existing swap partition with another install. It bypasses the 'mkswap' command to avoid modifying the UUID.
+4. The option --shared-swap can be used if you will be sharing an existing swap partition with another install. It bypasses the 'mkswap' command to avoid modifying the UUID.
 
 
 Usage: sudo bash wubi-move.sh [OPTION] target_partition [swap_partition]
