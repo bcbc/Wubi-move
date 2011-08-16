@@ -217,17 +217,17 @@ exit_script ()
     if [ ! -z "$root_disk" ]; then
       if [ $(mount | grep "$root_mount"/home'\ ' | wc -l) -ne 0 ]; then
         umount "$root_mount"/home > /dev/null 2>&1
-        sleep 1 
+        sleep 3 
         [ -d "$root_mount"/home ] && rmdir "$root_mount"/home > /dev/null 2>&1
       fi
       if [ $(mount | grep "$root_mount"/usr'\ ' | wc -l) -ne 0 ]; then
         umount "$root_mount"/usr > /dev/null 2>&1
-        sleep 1 
+        sleep 3 
         [ -d "$root_mount"/usr ] && rmdir "$root_mount"/usr > /dev/null 2>&1
       fi
       if [ $(mount | grep "$root_mount"'\ ' | wc -l) -ne 0 ]; then
         umount "$root_mount" > /dev/null 2>&1
-        sleep 1 
+        sleep 3 
       fi
       [ -d "$root_mount" ] && rmdir "$root_mount" > /dev/null 2>&1
     fi
@@ -291,8 +291,8 @@ mount_virtual_disk()
         else
             # some other issue - output message
             echo "$0: Error is: $(cat /tmp/wubi-move-error)"        
-            echo "$0: Check that the path/name is correct and the"
-            echo "$0: root.disk contains a working Wubi install."
+            echo "$0: Check that the path/name is correct and"
+            echo "$0: contains a working Wubi install."
         fi
         exit_script 1
     fi
@@ -311,14 +311,15 @@ check_fstab ()
             disks_path=`echo $fDEV | sed -e "s/\(^\/host\/ubuntu\/disks\/\)\(.*\)/\1/"`
             if [ "$disks_path" = "/host/ubuntu/disks/" ]; then          
                 virtual_disk=`echo $fDEV | sed -e "s/\(^\/host\/ubuntu\/disks\/\)\(.*\)/\2/"`
-                check_disk_mount "$fDEV"
-                if [ "$fMTPT" = "/home" ]; then 
-                   mkdir "$root_mount"/home
-                   mount_virtual_disk "$rootdiskpath"$virtual_disk "$root_mount"/home
-                else
-                   mkdir "$root_mount"/usr
-                   mount_virtual_disk "$rootdiskpath"$virtual_disk "$root_mount"/usr
+                if [ ! -f "$rootdiskpath"$virtual_disk ]; then
+                   echo "$0: Root disk contains a reference to: "$virtual_disk""
+                   echo "$0: This cannot be found in: "$rootdiskpath""
+                   echo "$0: Please fix and retry"
+                   exit_script 1
                 fi
+                check_disk_mount "$rootdiskpath"$virtual_disk"\ "
+                mkdir "$root_mount"$fMTPT
+                mount_virtual_disk "$rootdiskpath"$virtual_disk "$root_mount"$fMTPT
             fi    
           ;;
         esac
@@ -354,7 +355,7 @@ root_disk_migration ()
     mkdir -p $root_mount
 
 # make sure the root.disk is not already mounted
-    check_disk_mount "$root_disk"
+    check_disk_mount "$root_disk""\ "
 
 # mount it - fail if the mount fails
     mount_virtual_disk "$root_disk" "$root_mount"
