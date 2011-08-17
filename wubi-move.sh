@@ -571,8 +571,10 @@ pre_checks ()
 # included in the space check and can cause the migration to run out of space
 # during the rsync copy. Mountpoints under /mnt or /media and of course
 # /boot, /usr, /home, /root, /tmp and /host are not a problem.
+# This check doesn't apply to a root.disk migration
     mtpt=
-    while read DEV MTPT FSTYPE OPTS REST; do
+    if [ -z "$root_disk" ]; then
+      while read DEV MTPT FSTYPE OPTS REST; do
         case "$DEV" in
           /dev/sd[a-z][0-9])
             mtpt=$MTPT
@@ -598,7 +600,8 @@ pre_checks ()
             esac
           ;;
         esac
-    done < /proc/mounts
+      done < /proc/mounts
+    fi
 
 # Ubuntu releases prior to 9.10 don't support ext4 (default)
     if ! type mkfs.ext4 > /dev/null 2>&1 ; then
