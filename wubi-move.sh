@@ -848,7 +848,7 @@ migrate_files ()
     fi
     echo ""
     echo "$0: Copying files - please be patient - this takes some time"
-    rsync -a --exclude="$root"host --exclude="$root"mnt/* --exclude="$root"home/*/.gvfs --exclude="$root"media/*/* --exclude="$root"tmp/* --exclude="$root"proc/* --exclude="$root"sys/* $root $target # let errors show
+    rsync -a --exclude="$root"host --exclude="$root"mnt/* --exclude="$root"home/*/.gvfs --exclude="$root"var/lib/lightdm/.gvfs --exclude="$root"media/*/* --exclude="$root"tmp/* --exclude="$root"proc/* --exclude="$root"sys/* $root $target # let errors show
     if [ "$?" -ne 0 ]; then
         echo ""
         echo "$0: Copying files failed - user canceled?"
