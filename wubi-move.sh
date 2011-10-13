@@ -42,7 +42,7 @@ swapdev=                    # swap device for migration
 rootdiskpath=               # path to root.disk file
 
 # Literals 
-version=2.0.1               # Script version
+version=2.1                 # Script version
 target=/tmp/wubitarget      # target device mountpoint
 root_mount=/tmp/rootdisk    # root.disk mountpoint
 
