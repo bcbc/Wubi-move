@@ -42,7 +42,7 @@ swapdev=                    # swap device for migration
 rootdiskpath=               # path to root.disk file
 
 # Literals 
-version=2.1                 # Script version
+version=2.1.1               # Script version
 target=/tmp/wubitarget      # target device mountpoint
 root_mount=/tmp/rootdisk    # root.disk mountpoint
 
@@ -501,15 +501,15 @@ pre_checks ()
         echo "$0: target_partition "$dev" is a drive, not a partition."
         exit_script 1
     fi
-    if [ $(fdisk -l | grep "$dev[ \t]" | grep "[ \t]5[ \t]" | grep "Extended" | wc -l) -eq 1 ]; then
+    if [ $(fdisk -l | grep "$dev[ \t]" | grep "[ \t]5[ \t]" | grep -i "Extended" | wc -l) -eq 1 ]; then
         echo "$0: target_partition "$dev" is an Extended partition."
         exit_script 1
     fi
-    if [ $(fdisk -l | grep "$dev[ \t]" | grep "[ \t]f[ \t]" | grep "W95 Ext'd (LBA)" | wc -l) -eq 1 ]; then
+    if [ $(fdisk -l | grep "$dev[ \t]" | grep "[ \t]f[ \t]" | grep -i "W95 Ext'd (LBA)" | wc -l) -eq 1 ]; then
         echo "$0: target_partition "$dev" is an Extended partition."
         exit_script 1
     fi
-    if [ $(fdisk -l | grep "$dev[ \t]" | grep "[ \t]85[ \t]" | grep "Linux extended" | wc -l) -eq 1 ]; then
+    if [ $(fdisk -l | grep "$dev[ \t]" | grep "[ \t]85[ \t]" | grep -i "Linux extended" | wc -l) -eq 1 ]; then
         echo "$0: target_partition "$dev" is an Extended partition."
         exit_script 1
     fi
@@ -518,7 +518,7 @@ pre_checks ()
 # with a partition type ntfs and a file system ext3/4. For future sanity and to avoid confusion
 # the partition should be prepared correctly beforehand. My own attempts to modify it to 83 in the
 # scripts with sfdisk have proven to be dangerous.
-    if [ $(fdisk -l | grep "$dev[ \t]" | grep "[ \t]83[ \t]" | grep "Linux" | wc -l) -eq 0 ]; then
+    if [ $(fdisk -l | grep "$dev[ \t]" | grep "[ \t]83[ \t]" | grep -i "Linux" | wc -l) -eq 0 ]; then
         echo "$0: target_partition "$dev" must be type 83 - Linux."
         exit_script 1
    fi
@@ -537,7 +537,7 @@ pre_checks ()
 # Blkid will report type "swap" or "swsuspend", the latter if
 # the swap partition contains a hibernated image.
     if [ -b "$swapdev" ]; then
-        if [ $(fdisk -l | grep "$swapdev[ \t]" | grep "[ \t]82[ \t]" | grep "Linux swap" | wc -l) -eq 0 ]; then
+        if [ $(fdisk -l | grep "$swapdev[ \t]" | grep "[ \t]82[ \t]" | grep -i "Linux swap" | wc -l) -eq 0 ]; then
             echo "$0: "$swapdev" is not a swap partition"
             exit_script 1
         fi
