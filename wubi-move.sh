@@ -40,7 +40,10 @@ debug=false                 # Output debug information
 dev=                        # target device for migration
 swapdev=                    # swap device for migration
 rootdiskpath=               # path to root.disk file
-synch_target=false          # synchronize previously migrated install
+resume_prev=false           # resume previous migration attempt
+homedev=                    # /home device for migration
+bootdev=                    # /boot device for migration
+usrdev=                     # /usr device for migration
 
 # Literals 
 version=2.1.1               # Script version
@@ -84,7 +87,11 @@ Migrate an ubuntu install (wubi or normal) to partition
   --shared-swap           share swap partition with an existing install
   -y, --assume-yes        assume yes to all prompts
   --root-disk=<root.disk> Specify a root.disk file to migrate
-  --synch-target          Synchronize a previously migrated install
+  --boot=</dev/sdXY>      Specify a separate /boot partition
+  --home=</dev/sdXY>      Specify a separate /home partition
+  --usr=</dev/sdXY>       Specify a separate /usr partition
+  --resume                Resume a previous migration attempt that
+                          ended due to copying errors
 EOF
 } 
 assumptions_notes () 
@@ -154,10 +161,16 @@ for option in "$@"; do
     ;;
     --root-disk=*)
     root_disk=`echo "$option" | sed 's/--root-disk=//'` ;;
-### undocumented debug option
-    --synch-target)
-    synch_target=true
+    --home=*)
+    homedev=`echo "$option" | sed 's/--home=//'` ;;
+    --boot=*)
+    bootdev=`echo "$option" | sed 's/--boot=//'` ;;
+    --usr=*)
+    usrdev=`echo "$option" | sed 's/--usr=//'` ;;
+   --resume)
+    resume_prev=true
     ;;
+### undocumented debug option
     -d | --debug)
     set -x
     debug=true
@@ -243,7 +256,22 @@ exit_script ()
       rmdir "$target"/host > /dev/null 2>&1
     fi
 
-# Now unmount migrated install if required, and delete the mountpoint
+# Now unmount migrated install if required, and delete the mountpoints
+    if [ $(mount | grep "$target"/home'\ ' | wc -l) -ne 0 ]; then
+      umount "$target"/home > /dev/null 2>&1
+      sleep 3
+      [ -d "$target"/home ] && rmdir "$target"/home > /dev/null 2>&1
+    fi
+    if [ $(mount | grep "$target"/usr'\ ' | wc -l) -ne 0 ]; then
+      umount "$target"/usr > /dev/null 2>&1
+      sleep 3
+      [ -d "$target"/usr ] && rmdir "$target"/usr > /dev/null 2>&1
+    fi
+    if [ $(mount | grep "$target"/boot'\ ' | wc -l) -ne 0 ]; then
+      umount "$target"/boot > /dev/null 2>&1
+      sleep 3
+      [ -d "$target"/boot ] && rmdir "$target"/boot > /dev/null 2>&1
+    fi
     if [ $(mount | grep "$target"'\ ' | wc -l) -ne 0 ]; then
       umount $target > /dev/null 2>&1
       sleep 1
@@ -376,6 +404,10 @@ root_disk_migration ()
 # determine size of install
     awkscript="\$6==\""$root_mount"\" || \$6==\""$root_mount"/usr\" || \$6==\""$root_mount"/home\" {sum += \$3} END {print sum}"
     install_size=$(df | awk "$awkscript")
+    awkscript="\$2==\""$root_mount"/home\ \" {total = \$1} END {print total}"
+#    home_size=$(du -s "$root_mount"/home | awk "$awkscript")
+#    awkscript="\$2==\""$root_mount"/boot\ \" {total = \$1} END {print total}"
+#    boot_size=$(du -s "$root_mount"/boot | awk "$awkscript")
 
 # check we have all the required files - grub legacy won't work as
 # we never mount /boot separately
@@ -482,6 +514,23 @@ check_wubi ()
     fi
 }
 
+### other device prechecks
+precheck_other ()
+{
+    for i in "$homedev" "$bootdev" "$usrdev"; do
+      if [ -n "$i" ]; then
+        if [ ! -b "$i" ]; then
+          echo "$0: "$i" is not a block device."            
+          exit_script 1
+        fi
+        if [ $(fdisk -l | grep "$i[ \t]" | grep "[ \t]83[ \t]" | grep -i "Linux" | wc -l) -eq 0 ]; then
+          echo "$0: partition "$i" must be type 83 - Linux."
+          exit_script 1
+        fi
+      fi
+    done
+}
+
 ### Early checks - must be admin, check target and swap device(s)
 ### Determine migration type - can be a normal Ubuntu install
 ### or a Wubi install (running or from a root.disk)
@@ -526,15 +575,17 @@ pre_checks ()
     if [ $(fdisk -l | grep "$dev[ \t]" | grep "[ \t]83[ \t]" | grep -i "Linux" | wc -l) -eq 0 ]; then
         echo "$0: target_partition "$dev" must be type 83 - Linux."
         exit_script 1
-   fi
+    fi
 
     if [ $(mount | grep "$dev"'\ ' | wc -l) -ne 0 ]; then
         echo "$0: "$dev" is mounted - please unmount and try again"
         exit_script 1
     fi
 
-# set --shared-swap with the synch option
-    if [ -n "$swapdev" ] && [ "$synch_target" = "true" ]; then
+    precheck_other
+
+# set --shared-swap with the resume option
+    if [ -n "$swapdev" ] && [ "$resume_prev" = "true" ]; then
         no_mkswap=true
     fi
 
@@ -706,8 +757,9 @@ sanity_checks ()
 # have to format first
     echo ""
     if mount -t auto "$dev" $target 2> /dev/null; then
-        if [ "$synch_target" = "true" ]; then
-           # add checks to make sure it's valid - a synch file is present?
+        if [ "$resume_prev" = "true" ]; then
+           # add checks to make sure it's valid - a 'resume' file is present?
+           # the same options should be specified?
            umount $target
            return 0
         fi
@@ -756,7 +808,7 @@ sanity_checks ()
     if [ -z "$root_disk" ]; then
         install_size=$(df | awk '$6=="/" || $6=="/home" || $6=="/usr"|| $6=="/boot" {sum += $3} END {print sum}')
         if [ "$install_size" = "" ]; then # 8.04 - awk used zero based column index
-          install_size=$(df | awk '$5=="/" || $5=="/home" || $5=="/usr" || $6=="/boot" {sum += $2} END {print sum}')
+          install_size=$(df | awk '$5=="/" || $5=="/home" || $5=="/usr" || $5=="/boot" {sum += $2} END {print sum}')
           target_size=$(df $target|tail -n 1|awk '{print $1}')
         fi
     fi
@@ -784,17 +836,20 @@ sanity_checks ()
 ### migration can proceed unattended
 final_questions ()
 {
-    if [ "$synch_target" = "true" ]; then
-      echo "$0: The target on "$dev" will be synchronized."        
-      test_YN "Continue and install Grub2 to "$disk?" (Y/N)"
+    if [ "$resume_prev" = "true" ]; then
+      echo "$0: The previous migration attempt to "$dev""
+      echo "$0: will be resumed."
+      if [ "$no_bootloader" = "true" ] ; then
+        test_YN "Continue without installing the bootloader? (Y/N)"
+      else
+        install_grub=true
+        test_YN "Continue and install Grub2 to "$disk?" (Y/N)"
+      fi
       # User pressed N
       if [ "$?" -eq "1" ]; then
-        echo "$0: User canceled synchronization."
+        echo "$0: User canceled resume attempt."
         exit_script 1 
       fi
-      # for now default install_grub to true
-      # later check grub-install devices on target and allow override
-      install_grub=true
       return 0
     fi
 
@@ -835,12 +890,46 @@ final_questions ()
     fi
 }
 
+# Format separate partitions if required - this is a hack to get it working
+# separate later
+format_other ()
+{
+    if [ -n "$homedev" ]; then
+      echo "$0: Formatting "$homedev" with "$fs" file system"
+      mkfs."$fs" "$homedev" > /dev/null 2>&1
+      if [ "$?" != 0 ]; then
+        echo "$0: Formatting "$homedev" failed or was canceled"
+        echo "$0: Migration request canceled"
+        exit_script 1
+      fi
+    fi
+    if [ -n "$bootdev" ]; then
+      echo "$0: Formatting "$bootdev" with "$fs" file system"
+      mkfs."$fs" "$bootdev" > /dev/null 2>&1
+      if [ "$?" != 0 ]; then
+        echo "$0: Formatting "$bootdev" failed or was canceled"
+        echo "$0: Migration request canceled"
+        exit_script 1
+      fi
+    fi
+    if [ -n "$usrdev" ]; then
+      echo "$0: Formatting "$usrdev" with "$fs" file system"
+      mkfs."$fs" "$usrdev" > /dev/null 2>&1
+      if [ "$?" != 0 ]; then
+        echo "$0: Formatting "$usrdev" failed or was canceled"
+        echo "$0: Migration request canceled"
+        exit_script 1
+      fi
+    fi
+}
+
+
 # Format the target partition file system
 # Message to close open programs to prevent partial updates
 # being copied as is.
 format_partition ()
 {
-    if [ "$synch_target" = "true" ]; then
+    if [ "$resume_prev" = "true" ]; then
       return 0
     fi
 
@@ -863,6 +952,40 @@ format_partition ()
         echo "$0: Migration request canceled"
         exit_script 1
       fi
+      format_other
+    fi
+}
+
+# Mount separate partitions if required - this is a hack to get it working
+# separate later
+mount_other ()
+{
+    if [ -n "$homedev" ]; then
+        mkdir -p "$target"/home
+        mount $homedev "$target"/home
+        if [ "$?" != 0 ]; then
+            echo "$0: "$homedev" failed to mount for /home"
+            echo "$0: Migration request canceled"
+            exit_script 1
+        fi
+    fi
+    if [ -n "$bootdev" ]; then
+        mkdir -p "$target"/boot
+        mount $bootdev "$target"/boot
+        if [ "$?" != 0 ]; then
+            echo "$0: "$bootdev" failed to mount for /boot"
+            echo "$0: Migration request canceled"
+            exit_script 1
+        fi
+    fi
+    if [ -n "$usrdev" ]; then
+        mkdir -p "$target"/usr
+        mount $usrdev "$target"/usr
+        if [ "$?" != 0 ]; then
+            echo "$0: "$usrdev" failed to mount for /usr"
+            echo "$0: Migration request canceled"
+            exit_script 1
+        fi
     fi
 }
 
@@ -879,12 +1002,15 @@ migrate_files ()
         echo "$0: Migration request canceled"
         exit_script 1
     fi
+    mount_other
     echo ""
     echo "$0: Copying files - please be patient - this takes some time"
-    rsync -a --delete="$root"host --exclude="$root"mnt/* --exclude="$root"home/*/.gvfs --exclude="$root"var/lib/lightdm/.gvfs --exclude="$root"media/*/* --exclude="$root"tmp/* --exclude="$root"proc/* --exclude="$root"sys/* $root $target # let errors show
+    rsync -a --delete --exclude="$root"host --exclude="$root"mnt/* --exclude="$root"home/*/.gvfs --exclude="$root"var/lib/lightdm/.gvfs --exclude="$root"media/*/* --exclude="$root"tmp/* --exclude="$root"proc/* --exclude="$root"sys/* $root $target # let errors show
     if [ "$?" -ne 0 ]; then
         echo ""
-        echo "$0: Copying files failed - user canceled?"
+        echo "$0: Copying files failed. If the failure is due"
+        echo "$0: to file corruption, correct the problem and"
+        echo "$0: rerun with the --resume option."
         echo "$0: Unmounting target..."
         sleep 3
         umount $dev
@@ -964,6 +1090,18 @@ edit_fstab ()
     if [ -b "$swapdev" ]; then
         echo "# swap was on "$swapdev" when migrated" >> $target/etc/fstab
         echo "UUID=$(blkid -c /dev/null -o value -s UUID $swapdev)    none    swap    sw    0    0" >> $target/etc/fstab
+    fi
+    if [ -b "$homedev" ]; then
+        echo "# /home was on "$homedev" when migrated" >> $target/etc/fstab
+        echo "UUID=$(blkid -c /dev/null -o value -s UUID $homedev)    /home    "$fs"    errors=remount-ro    0    2" >> $target/etc/fstab
+    fi
+    if [ -b "$bootdev" ]; then
+        echo "# /boot was on "$bootdev" when migrated" >> $target/etc/fstab
+        echo "UUID=$(blkid -c /dev/null -o value -s UUID $bootdev)    /boot    "$fs"    errors=remount-ro    0    2" >> $target/etc/fstab
+    fi
+    if [ -b "$usrdev" ]; then
+        echo "# /usr was on "$usrdev" when migrated" >> $target/etc/fstab
+        echo "UUID=$(blkid -c /dev/null -o value -s UUID $usrdev)    /usr    "$fs"    errors=remount-ro    0    2" >> $target/etc/fstab
     fi
 }
 
