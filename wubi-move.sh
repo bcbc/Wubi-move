@@ -44,6 +44,7 @@ resume_prev=false           # resume previous migration attempt
 homedev=                    # /home device for migration
 bootdev=                    # /boot device for migration
 usrdev=                     # /usr device for migration
+check_only=false            # just do checks - no changes
 
 # Literals 
 version=2.1.1               # Script version
@@ -91,8 +92,10 @@ Migrate an ubuntu install (wubi or normal) to partition
   --boot=</dev/sdXY>      Specify a separate /boot partition
   --home=</dev/sdXY>      Specify a separate /home partition
   --usr=</dev/sdXY>       Specify a separate /usr partition
-  --resume                Resume a previous migration attempt that
-                          ended due to copying errors
+  -c, --check-only        Check only - validate target partition(s)
+  --resume                Resume a previous migration attempt that ended
+                          due to copying errors (rsync). No formats or
+                          space checks. Same partitions from before.
 EOF
 } 
 assumptions_notes () 
@@ -171,6 +174,9 @@ for option in "$@"; do
    --resume)
     resume_prev=true
     ;;
+    -c | --check-only)
+    check_only=true
+    ;;
 ### undocumented debug option
     -d | --debug)
     set -x
@@ -208,7 +214,7 @@ log() {
 
 error() {
   log "error: " "$@"
-  echo " $0: $@"
+  echo "$0: $@"
 }
 
 info() {
@@ -309,8 +315,11 @@ exit_script ()
     fi
 
 # Output success message if normal termination
+    if [ "$check_only" == "true" ]; then
+      exit $1
+    fi
+    echo ""
     if [ $1 -eq 0 ]; then
-      echo ""
       result "Migration completed successfully."
     else
       result "Migration did not complete successfully."
@@ -616,8 +625,49 @@ pre_checks ()
     precheck_other
 
 # set --shared-swap with the resume option
-    if [ -n "$swapdev" ] && [ "$resume_prev" = "true" ]; then
-        no_mkswap=true
+    if [ "$resume_prev" = "true" ]; then
+      if [ ! -f ~/.wubi-move ]; then
+        error "Option --resume is not allowed"
+        error "Run: bash $0 --help for more info"
+        exit_script 1
+      fi
+      read tRoot tSwap tBoot tUsr tHome < ~/.wubi-move 2>&1
+      okay=true
+      if [ "$tRoot" != "$dev" ]; then
+        okay=false
+      fi
+      if [ "$tSwap" == "none" ]; then
+        tSwap=""
+      fi
+      if [ "$tBoot" == "none" ]; then
+        tBoot=""
+      fi
+      if [ "$tUsr" == "none" ]; then
+        tUsr=""
+      fi
+      if [ "$tHome" == "none" ]; then
+        tHome=""
+      fi
+      if [ "$tSwap" != "$swapdev" ]; then
+        okay=false
+      fi
+      if [ "$tBoot" != "$bootdev" ]; then
+        okay=false
+      fi
+      if [ "$tUsr" != "$usrdev" ]; then
+        okay=false
+      fi
+      if [ "$tHome" != "$homedev" ]; then
+        okay=false
+      fi
+      if [ "$okay" == "false" ]; then
+        error "The target partitions cannot be changed"
+        error "when using the --resume option"
+        exit_script 1
+      fi
+      if [ -n "$swapdev" ]; then
+          no_mkswap=true
+      fi
     fi
 
 # swap device must be the correct type
@@ -859,6 +909,9 @@ sanity_checks ()
         info "PLEASE MAKE SURE YOU HAVE SELECTED THE CORRECT PARTITION."
         # have to interrupt if the user has select --assume-yes, otherwise the
         # format_partition function will ask to continue.
+        if [ "$check_only" = "true" ]; then
+          exit_script 1
+        fi
         if [ "$assume_yes" = "true" ]; then
           test_YN "Continue? (Y/N)"
           # User pressed N
@@ -928,6 +981,10 @@ sanity_checks ()
 ### migration can proceed unattended
 final_questions ()
 {
+    if [ "$check_only" = "true" ]; then
+      info "Option --check-only: All tests succeeded"
+      exit_script 0
+    fi
     if [ "$resume_prev" = "true" ]; then
       info "The previous migration attempt to "$dev""
       info "will be resumed."
@@ -1064,6 +1121,33 @@ mount_other ()
     fi
 }
 
+create_resumefile ()
+{
+      if [ ! -f ~/.wubi-move ]; then
+        error "Option --resume is not allowed"
+        error "Run: bash $0 --help for more info"
+        exit_script 1
+      fi
+      tRoot=$dev
+      tSwap=$swapdev
+      tBoot=$bootdev
+      tUsr=$usrdev
+      tHome=$homedev
+      if [ $tSwap == "" ]; then
+        tSwap="none"
+      fi
+      if [ "$tBoot" == "" ]; then
+        tBoot="none"
+      fi
+      if [ "$tUsr" == "" ]; then
+        tUsr="none"
+      fi
+      if [ "$tHome" == "" ]; then
+        tHomes="none"
+      fi
+      echo "$tRoot $tSwap $tBoot $tUsr $tHome" > ~/.wubi-move
+}
+
 # Copy entire install to target partition
 # Monitor return code from rsync in case user hits CTRL-C.
 ## Make fake /host directory to allow override of /host mount 
@@ -1071,6 +1155,7 @@ mount_other ()
 # Disable 10_lupin script
 migrate_files ()
 {
+    create_resumefile
     mount $dev $target # should't fail ever - freshly formatted
     if [ "$?" != 0 ]; then
         error ""$dev" failed to mount"
