@@ -47,8 +47,9 @@ usrdev=                     # /usr device for migration
 
 # Literals 
 version=2.1.1               # Script version
-target=/tmp/wubitarget      # target device mountpoint
-root_mount=/tmp/rootdisk    # root.disk mountpoint
+target=/tmp/wubi-move/target        # target device mountpoint
+root_mount=/tmp/wubi-move/rootdisk  # root.disk source mountpoint
+other_mount=/tmp/wubi-move/other    # used to check other target partitions
 
 # Bools 
 formatted_dev=false         # Has the target been formatted?
@@ -200,6 +201,36 @@ for option in "$@"; do
     esac
 done
 
+# thanks os-prober
+log() {
+  logger -t "$0" "$@"
+}
+
+error() {
+  log "error: " "$@"
+  echo " $0: $@"
+}
+
+info() {
+  log "info: " "$@"
+  echo "$0: $@"
+}
+
+warn() {
+  log "warning: " "$@"
+  echo "$0: $@"
+}
+
+debug() {
+  log "debug: " "$@"
+}
+
+result () {
+  log "result: " "$@"
+  echo "$0: $@"
+}
+
+
 ### Present Y/N questions and check response 
 ### (a valid response is required)
 ### Parameter: the question requiring an answer
@@ -207,7 +238,7 @@ done
 test_YN ()
 {
     while true; do 
-      echo "$0: $@"
+      info "$@"
       read input
       case "$input" in 
         "y" | "Y" )
@@ -215,7 +246,7 @@ test_YN ()
         "n" | "N" )
           return 1 ;;
         * )
-          echo "$0: Invalid response ('$input')"
+          warn "Invalid response ('$input')"
       esac
     done
 }
@@ -250,27 +281,24 @@ exit_script ()
       [ -d "$root_mount" ] && rmdir "$root_mount" > /dev/null 2>&1
     fi
 
-# If a wubi install is being migrated, remove the fake /host
-# created to bypass grub errors. Do this before unmounting
-    if [ "$wubi_install" = "true" ] && [ -d "$target"/host ]; then
-      rmdir "$target"/host > /dev/null 2>&1
-    fi
+## If a wubi install is being migrated, remove the fake /host
+## created to bypass grub errors. Do this before unmounting
+#    if [ "$wubi_install" = "true" ] && [ -d "$target"/host ]; then
+#      rmdir "$target"/host > /dev/null 2>&1
+#    fi
 
 # Now unmount migrated install if required, and delete the mountpoints
     if [ $(mount | grep "$target"/home'\ ' | wc -l) -ne 0 ]; then
       umount "$target"/home > /dev/null 2>&1
       sleep 3
-      [ -d "$target"/home ] && rmdir "$target"/home > /dev/null 2>&1
     fi
     if [ $(mount | grep "$target"/usr'\ ' | wc -l) -ne 0 ]; then
       umount "$target"/usr > /dev/null 2>&1
       sleep 3
-      [ -d "$target"/usr ] && rmdir "$target"/usr > /dev/null 2>&1
     fi
     if [ $(mount | grep "$target"/boot'\ ' | wc -l) -ne 0 ]; then
       umount "$target"/boot > /dev/null 2>&1
       sleep 3
-      [ -d "$target"/boot ] && rmdir "$target"/boot > /dev/null 2>&1
     fi
     if [ $(mount | grep "$target"'\ ' | wc -l) -ne 0 ]; then
       umount $target > /dev/null 2>&1
@@ -283,7 +311,9 @@ exit_script ()
 # Output success message if normal termination
     if [ $1 -eq 0 ]; then
       echo ""
-      echo "$0: Operation completed successfully."
+      result "Migration completed successfully."
+    else
+      result "Migration did not complete successfully."
     fi
     exit $1
 }
@@ -300,7 +330,7 @@ check_disk_mount ()
           /dev/loop/*|/dev/loop[0-9])
             loop_file=`losetup "$DEV" | sed -e "s/^[^(]*(\([^)]\+\)).*/\1/"`
             if  [ "$loop_file" = "$1" ]; then
-                echo "$0: "$1" is mounted - please unmount and try again"
+                error ""$1" is mounted - please unmount and try again"
                 exit_script 1
             fi
           ;;
@@ -314,18 +344,18 @@ mount_virtual_disk()
     if mount -o loop "$1" "$2" 2> /tmp/wubi-move-error; then
         true #nothing yet
     else
-        echo "$0: "$1" could not be mounted"
+        error ""$1" could not be mounted"
 # Check for 'file system ext4 unknown' message e.g. if you boot an
 # 8.04 disk and try to migrate a current ext4 root.disk 
         if [ $(cat /tmp/wubi-move-error | grep "unknown filesystem type 'ext4'" | wc -l) -eq 1 ]; then 
-            echo "$0: The live environment you are using doesn't support"
-            echo "$0: the virtual disks ext4 file system. Try using an"
-            echo "$0: Ubuntu CD containing release 9.10 or later."
+            error "The live environment you are using doesn't support"
+            error "the virtual disks ext4 file system. Try using an"
+            error "Ubuntu CD containing release 9.10 or later."
         else
             # some other issue - output message
-            echo "$0: Error is: $(cat /tmp/wubi-move-error)"        
-            echo "$0: Check that the path/name is correct and"
-            echo "$0: contains a working Wubi install."
+            error "Error is: $(cat /tmp/wubi-move-error)"
+            error "Check that the path/name is correct and"
+            error "contains a working Wubi install."
         fi
         exit_script 1
     fi
@@ -345,9 +375,9 @@ check_fstab ()
             if [ "$disks_path" = "/host/ubuntu/disks/" ]; then          
                 virtual_disk=`echo $fDEV | sed -e "s/\(^\/host\/ubuntu\/disks\/\)\(.*\)/\2/"`
                 if [ ! -f "$rootdiskpath"$virtual_disk ]; then
-                   echo "$0: Root disk contains a reference to: "$virtual_disk""
-                   echo "$0: This cannot be found in: "$rootdiskpath""
-                   echo "$0: Please fix and retry"
+                   error "Root disk contains a reference to: "$virtual_disk""
+                   error "This cannot be found in: "$rootdiskpath""
+                   error "Please fix and retry"
                    exit_script 1
                 fi
                 check_disk_mount "$rootdiskpath"$virtual_disk"\ "
@@ -369,12 +399,12 @@ check_fstab ()
 root_disk_migration () 
 {
     if [ ! -f "$root_disk" ]; then
-        echo "$0: root disk not found: "$root_disk""
+        error "root disk not found: "$root_disk""
         exit_script 1
     fi
 # Since the migration can be from a live CD
     if [ "$no_bootloader" = "true" ]; then
-        echo "$0: You cannot use --no-bootloader with --root-disk"
+        error "You cannot use --no-bootloader with --root-disk"
         exit_script 1
     fi
     install_grub=true
@@ -405,31 +435,28 @@ root_disk_migration ()
     awkscript="\$6==\""$root_mount"\" || \$6==\""$root_mount"/usr\" || \$6==\""$root_mount"/home\" {sum += \$3} END {print sum}"
     install_size=$(df | awk "$awkscript")
     awkscript="\$2==\""$root_mount"/home\ \" {total = \$1} END {print total}"
-#    home_size=$(du -s "$root_mount"/home | awk "$awkscript")
-#    awkscript="\$2==\""$root_mount"/boot\ \" {total = \$1} END {print total}"
-#    boot_size=$(du -s "$root_mount"/boot | awk "$awkscript")
 
 # check we have all the required files - grub legacy won't work as
 # we never mount /boot separately
     if [ $(ls -1 "$root_mount"/usr | wc -l) -eq 0 ] || \
        [ $(ls -1 "$root_mount"/home | wc -l) -eq 0 ] || \
        [ $(ls -1 "$root_mount"/boot | wc -l) -eq 0 ]; then
-        echo "$0: Root disk ("$root_disk") missing required directories."
-        echo "$0: If the original release was prior to 9.10 then it can"
-        echo "$0: not be migrated from the root.disk."
+        error "Root disk ("$root_disk") missing required directories."
+        error "If the original release was prior to 9.10 then it can"
+        error "not be migrated from the root.disk."
         exit_script 1
     fi
 
 # make sure the architecture matches
     if [ $(file /bin/bash | grep '32-bit' | wc -l) -eq 1 ]; then
       if [ $(file "$root_mount"/bin/bash | grep '64-bit' | wc -l) -eq 1 ]; then
-        echo "$0: Current Ubuntu architecture is 32-bit but root.disk contains a 64-bit install."
-        echo "$0: You need to migrate from a 64-bit environment"
+        error "Current Ubuntu architecture is 32-bit but root.disk contains a 64-bit install."
+        error "You need to migrate from a 64-bit environment"
         exit_script 1
       fi
     elif [ $(file "$root_mount"/bin/bash | grep '32-bit' | wc -l) -eq 1 ]; then
-      echo "$0: Current Ubuntu architecture is 64-bit but root.disk contains a 32-bit install."
-      echo "$0: You need to migrate from a 32-bit environment"
+      error "Current Ubuntu architecture is 64-bit but root.disk contains a 32-bit install."
+      error "You need to migrate from a 32-bit environment"
       exit_script 1
     fi
 }
@@ -454,8 +481,8 @@ check_wubi ()
         fs=ext3
         return 1
       else
-        echo "$0: Cannot migrate from a Live CD/USB"
-        echo "$0: unless you use option: --root-disk= "
+        error "Cannot migrate from a Live CD/USB"
+        error "unless you use option: --root-disk= "
         exit_script 1
       fi
     fi
@@ -463,8 +490,8 @@ check_wubi ()
 # Check what device root (/) is mounted on
     root_device="`grub-probe --target=device / 2> /dev/null`"
     if [ -z "$root_device" ]; then
-        echo "$0: Cannot migrate from a Live CD/USB"
-        echo "$0: unless you use option: --root-disk= "
+        error "Cannot migrate from a Live CD/USB"
+        error "unless you use option: --root-disk= "
         exit_script 1
     fi
 
@@ -519,12 +546,16 @@ precheck_other ()
 {
     for i in "$homedev" "$bootdev" "$usrdev"; do
       if [ -n "$i" ]; then
+        if [ $(mount | grep "$i"'\ ' | wc -l) -ne 0 ]; then
+          error ""$i" is mounted - please unmount and try again"
+          exit_script 1
+        fi
         if [ ! -b "$i" ]; then
-          echo "$0: "$i" is not a block device."            
+          error ""$i" is not a block device."
           exit_script 1
         fi
         if [ $(fdisk -l | grep "$i[ \t]" | grep "[ \t]83[ \t]" | grep -i "Linux" | wc -l) -eq 0 ]; then
-          echo "$0: partition "$i" must be type 83 - Linux."
+          error "partition "$i" must be type 83 - Linux."
           exit_script 1
         fi
       fi
@@ -537,14 +568,14 @@ precheck_other ()
 pre_checks ()
 {
     if [ "$(whoami)" != root ]; then
-      echo "$0: Admin rights are required to run this program."
+      error "Admin rights are required to run this program."
       exit 1  # exit immediately no cleanup required
     fi
 
 # target device must be a non-empty string and a block device
 # make sure the device is not mounted already
     if [ -z "$dev" ] || [ ! -b "$dev" ]; then
-        echo "$0: target_partition ("$dev") must be a valid partition."
+        error "target_partition ("$dev") must be a valid partition."
         exit_script 1
     fi
 
@@ -552,19 +583,19 @@ pre_checks ()
 # specified the drive instead of the partition
     disk=${dev%%[0-9]*}
     if [ "$disk" = "$dev" ]; then
-        echo "$0: target_partition "$dev" is a drive, not a partition."
+        error "target_partition "$dev" is a drive, not a partition."
         exit_script 1
     fi
     if [ $(fdisk -l | grep "$dev[ \t]" | grep "[ \t]5[ \t]" | grep -i "Extended" | wc -l) -eq 1 ]; then
-        echo "$0: target_partition "$dev" is an Extended partition."
+        error "target_partition "$dev" is an Extended partition."
         exit_script 1
     fi
     if [ $(fdisk -l | grep "$dev[ \t]" | grep "[ \t]f[ \t]" | grep -i "W95 Ext'd (LBA)" | wc -l) -eq 1 ]; then
-        echo "$0: target_partition "$dev" is an Extended partition."
+        error "target_partition "$dev" is an Extended partition."
         exit_script 1
     fi
     if [ $(fdisk -l | grep "$dev[ \t]" | grep "[ \t]85[ \t]" | grep -i "Linux extended" | wc -l) -eq 1 ]; then
-        echo "$0: target_partition "$dev" is an Extended partition."
+        error "target_partition "$dev" is an Extended partition."
         exit_script 1
     fi
 # hard check - partition type must be "83 - Linux" 
@@ -573,12 +604,12 @@ pre_checks ()
 # the partition should be prepared correctly beforehand. My own attempts to modify it to 83 in the
 # scripts with sfdisk have proven to be dangerous.
     if [ $(fdisk -l | grep "$dev[ \t]" | grep "[ \t]83[ \t]" | grep -i "Linux" | wc -l) -eq 0 ]; then
-        echo "$0: target_partition "$dev" must be type 83 - Linux."
+        error "target_partition "$dev" must be type 83 - Linux."
         exit_script 1
     fi
 
     if [ $(mount | grep "$dev"'\ ' | wc -l) -ne 0 ]; then
-        echo "$0: "$dev" is mounted - please unmount and try again"
+        error ""$dev" is mounted - please unmount and try again"
         exit_script 1
     fi
 
@@ -591,7 +622,7 @@ pre_checks ()
 
 # swap device must be the correct type
     if [ -n "$swapdev" ] && [ ! -b "$swapdev" ]; then
-        echo "$0: swapdevice ("$swapdev") is not a block device."            
+        error "swapdevice ("$swapdev") is not a block device."
         exit_script 1
     fi
 # swap partition type is '82 - Linux swap / Solaris'
@@ -599,11 +630,11 @@ pre_checks ()
 # the swap partition contains a hibernated image.
     if [ -b "$swapdev" ]; then
         if [ $(fdisk -l | grep "$swapdev[ \t]" | grep "[ \t]82[ \t]" | grep -i "Linux swap" | wc -l) -eq 0 ]; then
-            echo "$0: "$swapdev" is not a swap partition"
+            error ""$swapdev" is not a swap partition"
             exit_script 1
         fi
         if [ "$(blkid -c /dev/null -o value -s TYPE "$swapdev")" = "swsuspend" ]; then
-            echo "$0: "$swapdev" contains a hibernated image"
+            error ""$swapdev" contains a hibernated image"
             exit_script 1
         fi
     fi
@@ -612,15 +643,15 @@ pre_checks ()
 # this will change the UUID (and you have to update the other install)
 # So make sure a) a swap partition has been supplied, and b) that is is valid
     if [ -z "$swapdev" ] && [ "$no_mkswap" = "true" ]; then
-        echo "$0: Option --shared-swap only valid with a swap partition"
+        error "Option --shared-swap only valid with a swap partition"
         exit_script 1
     fi
     if [ "$no_mkswap" = "true" ]; then
       if [ $(swapon -s | grep "$swapdev"'\ ' | wc -l) -eq 0 ]; then
         swapon $swapdev > /dev/null 2>&1
         if [ $? -ne 0 ]; then 
-            echo "$0: "$swapdev" is not an existing swap partition"
-            echo "$0: Option --shared-swap cannot be used"
+            error ""$swapdev" is not an existing swap partition"
+            error "Option --shared-swap cannot be used"
             exit_script 1
         else
           swapoff $swapdev > /dev/null 2>&1
@@ -652,10 +683,10 @@ pre_checks ()
                 true #ok
                 ;;
             *)
-                echo "$0: "$DEV" is mounted on "$MTPT""
-                echo "$0: The migration script does not automatically"
-                echo "$0: exclude this mountpoint."
-                echo "$0: Please unmount "$MTPT" and try again."
+                error ""$DEV" is mounted on "$MTPT""
+                error "The migration script does not automatically"
+                error "exclude this mountpoint."
+                error "Please unmount "$MTPT" and try again."
                 exit_script 1
                 ;;
             esac
@@ -677,7 +708,7 @@ pre_checks ()
       wubi_install=false
     fi
     if [ "$rc" -eq "2" ]; then
-      echo "$0: Unsupported Wubi install (irregular root.disk or mountpoint)"
+      error "Unsupported Wubi install (irregular root.disk or mountpoint)"
       exit_script 1
     fi
 
@@ -708,18 +739,18 @@ pre_checks ()
       fi        
       if [ "$grub_legacy" = "true" ]; then
         if [ "$internet_connection" = "false" ]; then
-          echo "$0: You need an active internet connection to replace"
-          echo "$0: Grub legacy with Grub2 on the migrated install"
+          error "You need an active internet connection to replace"
+          error "Grub legacy with Grub2 on the migrated install"
           exit_script 1
         fi
-        echo "$0: Grub (legacy) is installed - this will be replaced"
-        echo "$0: with Grub2 (only on the migrated install)." 
+        info "Grub (legacy) is installed - this will be replaced"
+        info "with Grub2 (only on the migrated install)."
         if [ "$no_bootloader" = "true" ]; then
-          echo "$0: You have selected --no-bootloader with grub-legacy"
-          echo "$0: You will have to manually modify your current grub"
-          echo "$0: menu.lst to boot the migrated install."
+          info "You have selected --no-bootloader with grub-legacy"
+          info "You will have to manually modify your current grub"
+          info "menu.lst to boot the migrated install."
         else
-          echo "$0: The Grub2 bootloader will be installed on "$disk"" 
+          info "The Grub2 bootloader will be installed on "$disk""
           install_grub=true
         fi
         # grub legacy wubi is always ext3
@@ -730,7 +761,7 @@ pre_checks ()
           test_YN "Continue and replace Grub legacy? (Y/N)"
           # User pressed N
           if [ "$?" -eq "1" ]; then
-            echo "$0: Migration request canceled by user"
+            info "Migration request canceled by user"
             exit_script 1
           fi
         fi
@@ -741,6 +772,47 @@ pre_checks ()
           grub_common_exists=false
         fi
       fi
+    fi
+}
+
+# validate other target partitions
+sanitycheck_other ()
+{
+# create a temp directory to mount the target partition
+# make sure the mountpoint is not in use
+    mkdir -p $other_mount
+    umount $other_mount 2> /dev/null
+
+# attempt to mount, determine size of target partition
+# check size of directory under current install ($root is either /
+# or the path that a root.disk is mounted under)
+    if mount -t auto "$2" $other_mount 2> /dev/null; then
+      targ_size=$(df $2 | tail -n 1 | awk '{print $2}')
+      curr_size=$(du -s "$root"$1 | cut -f 1)
+      debug "Current size of /$1 is $curr_size"
+      debug "Size of target for /$1 ($2) is $targ_size"
+      # just in case of an error, the size might be zero
+      if [ $curr_size = "" ] || [ $curr_size -eq 0 ]; then
+        error "Error determining size of /$1. Cancelling"
+        exit_script 1
+      fi
+      if [ $targ_size = "" ] || [ $targ_size -eq 0 ]; then
+        error "Error determining size of $2. Cancelling"
+        exit_script 1
+      fi
+      if [ $targ_size -lt $curr_size ]; then
+        error "Target partition for /$1 is not big enough"
+        error "The current install /$1 is $curr_size"
+        error "The target partition /$2 is $targ_size"
+        exit_script 1 
+      fi
+      root_size=`echo "$root_size - $curr_size" | bc`
+      debug "Remaining size of / reduced to: $root_size"
+      umount $other_mount
+    else
+        error "Partition $2 could not be mounted for validation."
+        error "Make sure it is a valid ext2/3/4 partition and try again"
+        exit_script 1
     fi
 }
 
@@ -767,7 +839,7 @@ sanity_checks ()
         if [ $(ls -1 $target | wc -l) -ne 0 ] ; then
           if [ $(ls -1 $target | wc -l) -gt 1 ] || \
              [ "$(ls $target)" != "lost+found" ]; then
-            echo "$0: Partition $dev is not empty. Cancelling"
+            error "Partition $dev is not empty. Cancelling"
             if [ "$debug" = "true" ]; then
                 test_YN "DEBUG mode: do you want to continue anyway?"
                 if [ $? -ne 0 ]; then
@@ -779,19 +851,19 @@ sanity_checks ()
           fi
         fi
     else
-        echo "$0: Partition $dev could not be mounted for validation."
-        echo "$0: This is normal if the partition is unformatted or the file"
-        echo "$0: system is corrupted. It could also mean you have entered" 
-        echo "$0: the wrong partition. The partition will have to be formatted"
-        echo "$0: in order to complete validation." 
-        echo "$0: PLEASE MAKE SURE YOU HAVE SELECTED THE CORRECT PARTITION."
+        info "Partition $dev could not be mounted for validation."
+        info "This is normal if the partition is unformatted or the file"
+        info "system is corrupted. It could also mean you have entered"
+        info "the wrong partition. The partition will have to be formatted"
+        info "in order to complete validation."
+        info "PLEASE MAKE SURE YOU HAVE SELECTED THE CORRECT PARTITION."
         # have to interrupt if the user has select --assume-yes, otherwise the
         # format_partition function will ask to continue.
         if [ "$assume_yes" = "true" ]; then
           test_YN "Continue? (Y/N)"
           # User pressed N
           if [ "$?" -eq "1" ]; then
-            echo "$0: Migration request canceled by user"
+            info "Migration request canceled by user"
             exit_script 1
           fi
         fi
@@ -808,25 +880,45 @@ sanity_checks ()
     if [ -z "$root_disk" ]; then
         install_size=$(df | awk '$6=="/" || $6=="/home" || $6=="/usr"|| $6=="/boot" {sum += $3} END {print sum}')
         if [ "$install_size" = "" ]; then # 8.04 - awk used zero based column index
+          debug "zero-based column index version of awk e.g. on release 8.04"
           install_size=$(df | awk '$5=="/" || $5=="/home" || $5=="/usr" || $5=="/boot" {sum += $2} END {print sum}')
           target_size=$(df $target|tail -n 1|awk '{print $1}')
         fi
     fi
+    debug "Target root partition size (in K):" $target_size
+    debug "Current total install size (in K):" $install_size
 
 # just in case of an error, the size might be zero
     if [ $install_size = "" ] || [ $install_size -eq 0 ]; then
-        echo "$0: Error determining size of install. Cancelling"
+        error "Error determining size of install. Cancelling"
         exit_script 1
     fi
 
+    #usr_size=$(du -s "$root_mount"/usr | cut -f 1)
+    #boot_size=$(du -s "$root_mount"/boot | cut -f 1)
+    #root_size=`echo "$size - $home_size - $usr_size - $boot_size" | bc` 
+
+    # if migrating to multiple partitions, validate each target (other than root)
+    # and reduce the root_size for the main target size check
+    root_size=$install_size
+    if [ -n "$homedev" ]; then
+      sanitycheck_other home $homedev
+    fi
+    if [ -n "$usrdev" ]; then
+      sanitycheck_other usr $usrdev
+    fi
+    if [ -n "$bootdev" ]; then
+      sanitycheck_other boot $bootdev
+    fi
+    
 # Ensure the target partition is large enough
 # Technically you can have an install less that 5GB but this seems
 # too small to be worth allowing
-    if [ $target_size -lt $install_size ] || [ $target_size -lt 5120000 ]; then
-        echo "$0: Target partition ($dev) is not big enough"
-        echo "$0: Current install is $install_size K"
-        echo "$0: Total space on target is $target_size K, (min reqd 5 GB)"
-        echo "$0: Cancelling"
+    if [ $target_size -lt $root_size ]; then
+        error "Target partition ($dev) is not big enough"
+        error "Current install is $root_size K"
+        error "Total space on target is $target_size K"
+        error "Cancelling"
         exit_script 1
     fi
     umount $target
@@ -837,8 +929,8 @@ sanity_checks ()
 final_questions ()
 {
     if [ "$resume_prev" = "true" ]; then
-      echo "$0: The previous migration attempt to "$dev""
-      echo "$0: will be resumed."
+      info "The previous migration attempt to "$dev""
+      info "will be resumed."
       if [ "$no_bootloader" = "true" ] ; then
         test_YN "Continue without installing the bootloader? (Y/N)"
       else
@@ -847,7 +939,7 @@ final_questions ()
       fi
       # User pressed N
       if [ "$?" -eq "1" ]; then
-        echo "$0: User canceled resume attempt."
+        info "User canceled resume attempt."
         exit_script 1 
       fi
       return 0
@@ -859,13 +951,13 @@ final_questions ()
     fi
     # No opt out for --root-disk= option, but user can cancel migration
     if [ ! -z "$root_disk" ] ; then
-      echo "$0: The Grub2 bootloader will be installed to "$disk"."
-      echo "$0: This is required when a migration is performed"
-      echo "$0: from a named root.disk file."
+      info "The Grub2 bootloader will be installed to "$disk"."
+      info "This is required when a migration is performed"
+      info "from a named root.disk file."
       test_YN "Continue and install Grub2 to "$disk?" (Y/N)"
       # User pressed N
       if [ "$?" -eq "1" ]; then
-        echo "$0: User canceled migration."
+        info "User canceled migration."
         exit_script 1 
       fi
       return 0
@@ -879,10 +971,10 @@ final_questions ()
     fi
 
     echo ""        
-    echo "$0: Would you like the grub2 bootloader to be installed"
-    echo "$0: to drive "$disk"? If you choose not to, you will"
-    echo "$0: still be able to boot your migrated install from"
-    echo "$0: your current install."
+    info "Would you like the grub2 bootloader to be installed"
+    info "to drive "$disk"? If you choose not to, you will"
+    info "still be able to boot your migrated install from"
+    info "your current install."
     test_YN "Install grub bootloader to "$disk?" (Y/N)"
     # User pressed Y
     if [ "$?" -eq "0" ]; then
@@ -890,37 +982,20 @@ final_questions ()
     fi
 }
 
-# Format separate partitions if required - this is a hack to get it working
+# Format separate partitions if required
 # separate later
 format_other ()
 {
-    if [ -n "$homedev" ]; then
-      echo "$0: Formatting "$homedev" with "$fs" file system"
-      mkfs."$fs" "$homedev" > /dev/null 2>&1
-      if [ "$?" != 0 ]; then
-        echo "$0: Formatting "$homedev" failed or was canceled"
-        echo "$0: Migration request canceled"
-        exit_script 1
+    for i in "$homedev" "$bootdev" "$usrdev"; do
+      if [ -n "$i" ]; then
+        info "Formatting "$i" with "$fs" file system"
+        mkfs."$fs" "$i" > /dev/null
+        if [ "$?" != 0 ]; then
+          error "Formatting "$i" failed or was canceled"
+          exit_script 1
+        fi
       fi
-    fi
-    if [ -n "$bootdev" ]; then
-      echo "$0: Formatting "$bootdev" with "$fs" file system"
-      mkfs."$fs" "$bootdev" > /dev/null 2>&1
-      if [ "$?" != 0 ]; then
-        echo "$0: Formatting "$bootdev" failed or was canceled"
-        echo "$0: Migration request canceled"
-        exit_script 1
-      fi
-    fi
-    if [ -n "$usrdev" ]; then
-      echo "$0: Formatting "$usrdev" with "$fs" file system"
-      mkfs."$fs" "$usrdev" > /dev/null 2>&1
-      if [ "$?" != 0 ]; then
-        echo "$0: Formatting "$usrdev" failed or was canceled"
-        echo "$0: Migration request canceled"
-        exit_script 1
-      fi
-    fi
+    done
 }
 
 
@@ -936,20 +1011,20 @@ format_partition ()
     if [ "$formatted_dev" != true ] ; then
       formatted_dev="true"
       if [ "$assume_yes" != true ] ; then
-        echo "$0: Please close all open files before continuing."
-        echo "$0: About to format the target partition ($dev)."
+        info "Please close all open files before continuing."
+        info "About to format the target partition ($dev)."
         test_YN "Proceed with format (Y/N)"
         # User pressed N
         if [ "$?" -eq "1" ]; then
-          echo "$0: Migration request canceled by user"
+          info "Migration request canceled by user"
           exit_script 1
         fi
       fi    
-      echo "$0: Formatting $dev with "$fs" file system"
-      mkfs."$fs" $dev > /dev/null 2>&1
+      info "Formatting $dev with "$fs" file system"
+      mkfs."$fs" $dev > /dev/null
       if [ "$?" != 0 ]; then
-        echo "$0: Formatting "$dev" failed or was canceled"
-        echo "$0: Migration request canceled"
+        error "Formatting "$dev" failed or was canceled"
+        error "Migration request canceled"
         exit_script 1
       fi
       format_other
@@ -964,8 +1039,8 @@ mount_other ()
         mkdir -p "$target"/home
         mount $homedev "$target"/home
         if [ "$?" != 0 ]; then
-            echo "$0: "$homedev" failed to mount for /home"
-            echo "$0: Migration request canceled"
+            error ""$homedev" failed to mount for /home"
+            error "Migration request canceled"
             exit_script 1
         fi
     fi
@@ -973,8 +1048,8 @@ mount_other ()
         mkdir -p "$target"/boot
         mount $bootdev "$target"/boot
         if [ "$?" != 0 ]; then
-            echo "$0: "$bootdev" failed to mount for /boot"
-            echo "$0: Migration request canceled"
+            error ""$bootdev" failed to mount for /boot"
+            error "Migration request canceled"
             exit_script 1
         fi
     fi
@@ -982,8 +1057,8 @@ mount_other ()
         mkdir -p "$target"/usr
         mount $usrdev "$target"/usr
         if [ "$?" != 0 ]; then
-            echo "$0: "$usrdev" failed to mount for /usr"
-            echo "$0: Migration request canceled"
+            error ""$usrdev" failed to mount for /usr"
+            error "Migration request canceled"
             exit_script 1
         fi
     fi
@@ -991,35 +1066,34 @@ mount_other ()
 
 # Copy entire install to target partition
 # Monitor return code from rsync in case user hits CTRL-C.
-# Make fake /host directory to allow override of /host mount 
+## Make fake /host directory to allow override of /host mount 
 # and prevent update-grub errors in chroot
 # Disable 10_lupin script
 migrate_files ()
 {
     mount $dev $target # should't fail ever - freshly formatted
     if [ "$?" != 0 ]; then
-        echo "$0: "$dev" failed to mount"
-        echo "$0: Migration request canceled"
+        error ""$dev" failed to mount"
+        error "Migration request canceled"
         exit_script 1
     fi
     mount_other
     echo ""
-    echo "$0: Copying files - please be patient - this takes some time"
+    info "Copying files - please be patient - this takes some time"
     rsync -a --delete --exclude="$root"host --exclude="$root"mnt/* --exclude="$root"home/*/.gvfs --exclude="$root"var/lib/lightdm/.gvfs --exclude="$root"media/*/* --exclude="$root"tmp/* --exclude="$root"proc/* --exclude="$root"sys/* $root $target # let errors show
     if [ "$?" -ne 0 ]; then
         echo ""
-        echo "$0: Copying files failed. If the failure is due"
-        echo "$0: to file corruption, correct the problem and"
-        echo "$0: rerun with the --resume option."
-        echo "$0: Unmounting target..."
+        error "Copying files failed. If the failure is due"
+        error "to file corruption, correct the problem and"
+        error "rerun with the --resume option."
+        error "Unmounting target..."
         sleep 3
         umount $dev
-        echo "$0: Migration request canceled"
         exit_script 1
     fi
 
     if [ "$wubi_install" = "true" ]; then
-      mkdir $target/host
+#      mkdir $target/host
       chmod -x $target/etc/grub.d/10_lupin > /dev/null 2>&1
     fi    
 } 
@@ -1032,11 +1106,11 @@ create_swap ()
 {
     if [ -b "$swapdev" ]; then
         if [ "$no_mkswap" = "false" ]; then
-          echo "$0: Creating swap..."
+          info "Creating swap..."
           mkswap $swapdev > /dev/null
           if [ "$?" != 0 ]; then
-            echo "$0: Command mkswap on "$swapdev" failed"
-            echo "$0: Migration will continue without swap"
+            warn "Command mkswap on "$swapdev" failed"
+            warn "Migration will continue without swap"
             swapdev=
           fi
         fi
@@ -1106,11 +1180,11 @@ edit_fstab ()
 }
 
 # Start chroot to target install
-# (mount empty /host to prevent update-grub errors for Wubi)
+## (mount empty /host to prevent update-grub errors for Wubi)
 start_chroot ()
 {
     echo ""
-    echo "$0: Starting chroot to the target install."
+    info "Starting chroot to the target install."
 # Note: for internet connection on chroot, the /etc/resolv.conf
 # is already copied - unless migrating from
 # root.disk - but this only supports grub2 right now so 
@@ -1119,18 +1193,18 @@ start_chroot ()
     for i in dev proc sys dev/pts; do
         mount --bind /$i $target/$i;
     done
-    if [ "$wubi_install" = "true" ] && [ -z "$root_disk" ]; then
-      mount --bind /host $target/host
-    fi
+#    if [ "$wubi_install" = "true" ] && [ -z "$root_disk" ]; then
+#      mount --bind /host $target/host
+#    fi
 }
 
 # Exit chroot from target install
 end_chroot ()
 {
-    echo "$0: Exiting from chroot on target install..."
-    if [ "$wubi_install" = "true" ] && [ -z "$root_disk" ]; then
-        umount $target/host
-    fi
+    info "Exiting from chroot on target install..."
+#    if [ "$wubi_install" = "true" ] && [ -z "$root_disk" ]; then
+#        umount $target/host
+#    fi
     for i in dev/pts dev proc sys; do 
         umount $target/$i;
     done 
@@ -1149,11 +1223,10 @@ target_cmd ()
         chroot $target $* > /dev/null 2> /tmp/wubi-move-error
     fi
     if [ $? -ne 0 ]; then
-        echo "$0: An error occurred within chroot"
-        echo "$0: Error is: $(cat /tmp/wubi-move-error)"        
-        echo "$0: Attempting to exit chroot normally..."
+        error "An error occurred within chroot"
+        error "Error is: $(cat /tmp/wubi-move-error)"        
+        error "Attempting to exit chroot normally..."
         end_chroot
-        echo "$0: Cancelling migration... "
         exit_script 1
     fi
 }
@@ -1178,7 +1251,7 @@ remove_upstart_bypass()
 chroot_cmds ()
 {
     if [ "$wubi_install" = "true" ]; then
-      echo "$0: Removing lupin-support on target..."
+      info "Removing lupin-support on target..."
       target_cmd apt-get -y remove lupin-support
     else 
       target_cmd update-initramfs -u
@@ -1190,15 +1263,15 @@ chroot_cmds ()
 ### where to install and run update-grub
 grub_legacy()
 {
-    echo "$0: Removing Grub Legacy on target..."
+    info "Removing Grub Legacy on target..."
     if [ "$grub_common_exists" = "true" ]; then
       target_cmd apt-get -y purge grub grub-common
     else
       target_cmd apt-get -y purge grub
     fi
     target_cmd mv /boot/grub /boot/grubold
-    echo "$0: Installing Grub2 on target..."
-    echo "$0: Transferring control to grub2 install process:"
+    info "Installing Grub2 on target..."
+    info "Transferring control to grub2 install process:"
     sleep 5
 # installing grub-pc in release 9.10 and greater requires user interaction
 # so don't suppress chroot output 
@@ -1217,9 +1290,9 @@ grub_legacy()
     sleep 2
     if [ "$install_grub" = "true" ]; then
         target_cmd grub-install $disk
-        echo "$0: Grub bootloader installed to $disk"
+        info "Grub bootloader installed to $disk"
     fi
-    echo "$0: Updating the target grub menu"
+    info "Updating the target grub menu"
     target_cmd update-grub
 
 }
@@ -1241,12 +1314,12 @@ grub_bootloader ()
     else
       if [ "$install_grub" = "true" ]; then
         target_cmd grub-install $disk
-        echo "$0: Grub bootloader installed to $disk"
+        info "Grub bootloader installed to $disk"
         echo SET grub-pc/install_devices $disk | chroot $target debconf-communicate > /dev/null 2>&1
       else
         echo RESET grub-pc/install_devices | chroot $target debconf-communicate > /dev/null 2>&1
       fi
-      echo "$0: Updating the target grub menu..."
+      info "Updating the target grub menu..."
       target_cmd update-grub
     fi
 }
@@ -1261,7 +1334,7 @@ update_grub ()
 {
     if [ -z "$root_disk" ] && [ "$grub_legacy" = "false" ]; then
         echo ""
-        echo "$0: Updating current grub menu to add new install..."
+        info "Updating current grub menu to add new install..."
         sleep 1
         update-grub
     fi
