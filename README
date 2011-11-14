@@ -23,6 +23,13 @@ Migrate an ubuntu install (wubi or normal) to partition
   --shared-swap           share swap partition with an existing install
   -y, --assume-yes        assume yes to all prompts
   --root-disk=<root.disk> Specify a root.disk file to migrate
+  --boot=</dev/sdXY>      Specify a separate /boot partition
+  --home=</dev/sdXY>      Specify a separate /home partition
+  --usr=</dev/sdXY>       Specify a separate /usr partition
+  -c, --check-only        Check only - validate target partition(s)
+  --resume                Resume a previous migration attempt that ended
+                          due to copying errors (rsync). No formats or
+                          space checks. Same partitions from before.
 
 Assumptions: 
   1. The script will detect automatically whether the current install

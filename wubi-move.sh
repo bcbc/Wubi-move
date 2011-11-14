@@ -74,6 +74,11 @@ mtpt=                       # Mount point determination working variable
 awkscript=                  # Contains AWK script
 target_size=                # size of target partition
 install_size=               # size of current install
+tRoot=                      # Validate --resume option - same partition for /
+tSwap=                      # Validate --resume option - same partition for swap
+tBoot=                      # Validate --resume option - same partition for /boot
+tUsr=                       # Validate --resume option - same partition for /usr
+tHome=                      # Validate --resume option - same partition for /home
 
 usage () 
 {
@@ -312,6 +317,15 @@ exit_script ()
     fi
     if [ -d "$target" ]; then
       rmdir "$target" > /dev/null 2>&1 
+    fi
+
+# other mountpoint - for checking multi-partition migrations
+    if [ $(mount | grep "$other_mount"'\ ' | wc -l) -ne 0 ]; then
+      umount $other_mount > /dev/null 2>&1
+      sleep 1
+    fi
+    if [ -d "$other_mount" ]; then
+      rmdir "$other_mount" > /dev/null 2>&1 
     fi
 
 # Output success message if normal termination
@@ -837,6 +851,20 @@ sanitycheck_other ()
 # check size of directory under current install ($root is either /
 # or the path that a root.disk is mounted under)
     if mount -t auto "$2" $other_mount 2> /dev/null; then
+      if [ $(ls -1 $other_mount | wc -l) -ne 0 ] ; then
+        if [ $(ls -1 $other_mount | wc -l) -gt 1 ] || \
+           [ "$(ls $other_mount)" != "lost+found" ]; then
+          error "Partition $2 is not empty. Cancelling"
+          if [ "$debug" = "true" ]; then
+              test_YN "DEBUG mode: do you want to continue anyway?"
+              if [ $? -ne 0 ]; then
+                  exit_script 1
+              fi
+          else
+             exit_script 1
+          fi
+        fi
+      fi
       targ_size=$(df $2 | tail -n 1 | awk '{print $2}')
       curr_size=$(du -s "$root"$1 | cut -f 1)
       debug "Current size of /$1 is $curr_size"
@@ -880,8 +908,7 @@ sanity_checks ()
     echo ""
     if mount -t auto "$dev" $target 2> /dev/null; then
         if [ "$resume_prev" = "true" ]; then
-           # add checks to make sure it's valid - a 'resume' file is present?
-           # the same options should be specified?
+           # For --resume the size checks are already completed
            umount $target
            return 0
         fi
@@ -1230,8 +1257,10 @@ edit_fstab ()
       sed -i 's:.*[ \t]swap[ \t].*::' $target/etc/fstab
     fi
 
-# the migration will 'merge' installs with separated /home, /boot, /usr
-# (not if the migration is from a root.disk file)
+# the migration can 'merge' installs with separated /home, /boot, /usr
+# or separate installs with a single / (root) partition. Either way,
+# remove the separate source mounts and then add back according to the 
+# target requirements.
     if [ "$wubi_install" = "true" ]; then
       sed -i 's:/.*home[\.]disk .*::' $target/etc/fstab
       sed -i 's:/.*usr[\.]disk .*::' $target/etc/fstab
