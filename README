@@ -36,7 +36,9 @@ Assumptions:
      to be migrated is a Wubi or normal install. 
   2. If you are running the script from a live CD/USB then the 
      --root-disk= option is required. The grub2 bootloader must be
-     installed when using this option.
+     installed when using this option. If there are separate virtual
+     disks (e.g. usr.disk, home.disk), they must be in the same 
+     directory as the root.disk. (Grub-legacy not supported).
   3. The grub2 bootloader will be installed to /dev/sdX where /dev/sdXY
      is the target partition, unless --no-bootloader is specified.
      You will still be prompted whether to install the grub bootloader 
@@ -52,9 +54,9 @@ Assumptions:
   5. The target partition file system will be formatted as ext4 (default) 
      or ext3 if detected on the install being migrated. The script will not
      modify the partition type i.e. set it to 83 (linux)
-  6. An install with separate /home, /boot, or /usr partitions or virtual
-     disks will be merged when it is migrated onto the single target 
-     partition and fstab modified accordingly.
+  6. The script supports migrating from multiple partitions, and also
+     to multiple partitions. Separate target partitions are supported
+     for /boot, /usr and /home.
 
 Notes:
   If you install the grub bootloader, then the grub menu from your migrated

@@ -111,7 +111,9 @@ Assumptions:
      to be migrated is a Wubi or normal install. 
   2. If you are running the script from a live CD/USB then the 
      --root-disk= option is required. The grub2 bootloader must be
-     installed when using this option.
+     installed when using this option. If there are separate virtual
+     disks (e.g. usr.disk, home.disk), they must be in the same 
+     directory as the root.disk. (Grub-legacy not supported).
   3. The grub2 bootloader will be installed to /dev/sdX where /dev/sdXY
      is the target partition, unless --no-bootloader is specified.
      You will still be prompted whether to install the grub bootloader 
@@ -125,10 +127,11 @@ Assumptions:
      on releases 9.10 and greater. It will also prompt for the bootloader
      install drive/partition.
   5. The target partition file system will be formatted as ext4 (default) 
-     or ext3 if detected on the install being migrated.
-  6. An install with separate /home, /boot, or /usr partitions or virtual
-     disks will be merged when it is migrated onto the single target 
-     partition and fstab modified accordingly.
+     or ext3 if detected on the install being migrated. The script will not
+     modify the partition type i.e. set it to 83 (linux)
+  6. The script supports migrating from multiple partitions, and also
+     to multiple partitions. Separate target partitions are supported
+     for /boot, /usr and /home.
 
 Notes:
   If you install the grub bootloader, then the grub menu from your migrated
@@ -262,11 +265,30 @@ test_YN ()
     done
 }
 
-### Exit script - cleanup on way out
-### Parameter 1:
+### Final exit script
+### All cleanup has been done - output the result based on
+### the parameter (provided --check-only not used):
 ###    0 = successful execution
 ###    1 = exception
-exit_script ()
+final_exit ()
+{
+    if [ "$check_only" == "true" ]; then
+      exit $1
+    fi
+    echo ""
+    if [ $1 -eq 0 ]; then
+      result "Migration completed successfully."
+      if [ -f ~/.wubi-move ]; then
+        mv -f ~/.wubi-move ~/.wubi-move.last
+      fi
+    else
+      result "Migration did not complete successfully."
+    fi
+    exit $1
+}
+
+### Unmount any (loop) devices used in script and remove mountpoints
+cleanup_for_exit ()
 {
 # all mount checks with grep add a space to differentiate e.g. /dev/sda1 from /dev/sda11
 # Not really necessary for these custom mountpoints but do it anyway.
@@ -298,7 +320,9 @@ exit_script ()
 #      rmdir "$target"/host > /dev/null 2>&1
 #    fi
 
-# Now unmount migrated install if required, and delete the mountpoints
+# Now unmount migrated install if required and delete main mountpoint
+# If migrating to separate partitions, unmount first but leave these
+# mountpoints in place.
     if [ $(mount | grep "$target"/home'\ ' | wc -l) -ne 0 ]; then
       umount "$target"/home > /dev/null 2>&1
       sleep 3
@@ -327,18 +351,17 @@ exit_script ()
     if [ -d "$other_mount" ]; then
       rmdir "$other_mount" > /dev/null 2>&1 
     fi
+}
 
-# Output success message if normal termination
-    if [ "$check_only" == "true" ]; then
-      exit $1
-    fi
-    echo ""
-    if [ $1 -eq 0 ]; then
-      result "Migration completed successfully."
-    else
-      result "Migration did not complete successfully."
-    fi
-    exit $1
+### Early exit - problem detected or user canceled or
+### the --check-only option was supplied.
+### Call cleanup and final exit, passing parameter:
+###    0 = successful execution
+###    1 = exception
+exit_script ()
+{
+    cleanup_for_exit
+    final_exit $1
 }
 
 # Check that a virtual disk is not mounted
@@ -638,13 +661,25 @@ pre_checks ()
 
     precheck_other
 
-# set --shared-swap with the resume option
-    if [ "$resume_prev" = "true" ]; then
+# When using --resume option, also set --shared-swap (mkswap already run)
+# Make sure that the target partitions are the same as when the resume
+# file was created (with this option we are picking up after rsync errors
+# so no formatting of target partitions, checking they are empty, or that
+# there is enough space - so it's important that the partitions haven't 
+# changed.)
+# If the --resume option is not used, remove the old .wubi-move file.
+    if [ "$resume_prev" != "true" ]; then
+      if [ -f ~/.wubi-move ]; then
+        mv -f ~/.wubi-move ~/.wubi-move.last
+      fi
+    else
       if [ ! -f ~/.wubi-move ]; then
         error "Option --resume is not allowed"
         error "Run: bash $0 --help for more info"
         exit_script 1
       fi
+# Read previous target partitions - tRoot will will always be present
+# The others may be set to 'none' if they were not used previously
       read tRoot tSwap tBoot tUsr tHome < ~/.wubi-move 2>&1
       okay=true
       if [ "$tRoot" != "$dev" ]; then
@@ -1470,5 +1505,6 @@ chroot_cmds
 grub_bootloader
 remove_upstart_bypass
 end_chroot
+cleanup_for_exit
 update_grub
-exit_script 0
+final_exit 0
