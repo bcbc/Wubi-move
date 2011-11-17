@@ -51,7 +51,8 @@ version=2.1.1               # Script version
 target=/tmp/wubi-move/target        # target device mountpoint
 root_mount=/tmp/wubi-move/rootdisk  # root.disk source mountpoint
 other_mount=/tmp/wubi-move/other    # used to check other target partitions
-space_buffer=150000         # additional Kilobytes free space required on target partition(s)
+space_buffer=500000         # minimum Kilobytes free space required on target partition(s)
+boot_space_buffer=200000    # minimum additional free space required for separate boot partition
 
 # Bools 
 formatted_dev=false         # Has the target been formatted?
@@ -914,7 +915,11 @@ sanitycheck_other ()
         error "Error determining size of $2. Cancelling"
         exit_script 1
       fi
-      temp_size=`echo "$curr_size + $space_buffer" | bc` 
+      if [ "$1" == "boot" ]; then
+        temp_size=`echo "$curr_size + $boot_space_buffer" | bc` 
+      else
+        temp_size=`echo "$curr_size + $space_buffer" | bc` 
+      fi
       if [ $targ_size -lt $temp_size ]; then
         error "Target partition for /$1 is not big enough"
         error "The current install /$1 is $curr_size K"
@@ -1480,6 +1485,8 @@ grub_bootloader ()
 # From a grub legacy install this is left to the user to do manually
 update_grub ()
 {
+# garbage collection to refresh cache
+    blkid -g
     if [ -z "$root_disk" ] && [ "$grub_legacy" = "false" ]; then
         echo ""
         info "Updating current grub menu to add new install..."
