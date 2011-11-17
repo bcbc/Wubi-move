@@ -51,6 +51,7 @@ version=2.1.1               # Script version
 target=/tmp/wubi-move/target        # target device mountpoint
 root_mount=/tmp/wubi-move/rootdisk  # root.disk source mountpoint
 other_mount=/tmp/wubi-move/other    # used to check other target partitions
+space_buffer=150000         # additional Kilobytes free space required on target partition(s)
 
 # Bools 
 formatted_dev=false         # Has the target been formatted?
@@ -680,7 +681,7 @@ pre_checks ()
       fi
 # Read previous target partitions - tRoot will will always be present
 # The others may be set to 'none' if they were not used previously
-      read tRoot tSwap tBoot tUsr tHome < ~/.wubi-move 2>&1
+      read tRoot tSwap tBoot tUsr tHome < ~/.wubi-move 2> /dev/null
       okay=true
       if [ "$tRoot" != "$dev" ]; then
         okay=false
@@ -901,7 +902,7 @@ sanitycheck_other ()
         fi
       fi
       targ_size=$(df $2 | tail -n 1 | awk '{print $2}')
-      curr_size=$(du -s "$root"$1 | cut -f 1)
+      curr_size=$(du -s "$root"$1 2> /dev/null | cut -f 1)
       debug "Current size of /$1 is $curr_size"
       debug "Size of target for /$1 ($2) is $targ_size"
       # just in case of an error, the size might be zero
@@ -913,10 +914,13 @@ sanitycheck_other ()
         error "Error determining size of $2. Cancelling"
         exit_script 1
       fi
-      if [ $targ_size -lt $curr_size ]; then
+      temp_size=`echo "$curr_size + $space_buffer" | bc` 
+      if [ $targ_size -lt $temp_size ]; then
         error "Target partition for /$1 is not big enough"
-        error "The current install /$1 is $curr_size"
-        error "The target partition /$2 is $targ_size"
+        error "The current install /$1 is $curr_size K"
+        error "The target partition "$2" is $targ_size K"
+        error "There must be at least "$space_buffer" K free space"
+        error "Cancelling"
         exit_script 1 
       fi
       root_size=`echo "$root_size - $curr_size" | bc`
@@ -1026,13 +1030,14 @@ sanity_checks ()
       sanitycheck_other boot $bootdev
     fi
     
-# Ensure the target partition is large enough
-# Technically you can have an install less that 5GB but this seems
-# too small to be worth allowing
-    if [ $target_size -lt $root_size ]; then
+# Ensure the target partition is large enough 
+# There must be some free space ($space_buffer)
+    temp_size=`echo "$root_size + $space_buffer" | bc` 
+    if [ $target_size -lt $temp_size ]; then
         error "Target partition ($dev) is not big enough"
         error "Current install is $root_size K"
         error "Total space on target is $target_size K"
+        error "There must be at least $space_buffer K free space"
         error "Cancelling"
         exit_script 1
     fi
@@ -1185,17 +1190,12 @@ mount_other ()
 
 create_resumefile ()
 {
-      if [ ! -f ~/.wubi-move ]; then
-        error "Option --resume is not allowed"
-        error "Run: bash $0 --help for more info"
-        exit_script 1
-      fi
       tRoot=$dev
       tSwap=$swapdev
       tBoot=$bootdev
       tUsr=$usrdev
       tHome=$homedev
-      if [ $tSwap == "" ]; then
+      if [ "$tSwap" == "" ]; then
         tSwap="none"
       fi
       if [ "$tBoot" == "" ]; then
@@ -1205,7 +1205,7 @@ create_resumefile ()
         tUsr="none"
       fi
       if [ "$tHome" == "" ]; then
-        tHomes="none"
+        tHome="none"
       fi
       echo "$tRoot $tSwap $tBoot $tUsr $tHome" > ~/.wubi-move
 }
@@ -1235,7 +1235,6 @@ migrate_files ()
         error "rerun with the --resume option."
         error "Unmounting target..."
         sleep 3
-        umount $dev
         exit_script 1
     fi
 
