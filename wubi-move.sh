@@ -51,8 +51,8 @@ version=2.1.1               # Script version
 target=/tmp/wubi-move/target        # target device mountpoint
 root_mount=/tmp/wubi-move/rootdisk  # root.disk source mountpoint
 other_mount=/tmp/wubi-move/other    # used to check other target partitions
-space_buffer=500000         # minimum Kilobytes free space required on target partition(s)
-boot_space_buffer=200000    # minimum additional free space required for separate boot partition
+space_buffer=400000         # minimum Kilobytes free space required on target partition(s)
+boot_space_buffer=100000    # minimum additional free space required for separate boot partition
 
 # Bools 
 formatted_dev=false         # Has the target been formatted?
@@ -219,22 +219,22 @@ done
 
 # thanks os-prober
 log() {
-  logger -t "$0" "$@"
+  logger -t "$0" -- "$@"
 }
 
 error() {
   log "error: " "$@"
-  echo "$0: $@"
+  echo "$0: " "$@"
 }
 
 info() {
   log "info: " "$@"
-  echo "$0: $@"
+  echo "$0: " "$@"
 }
 
 warn() {
   log "warning: " "$@"
-  echo "$0: $@"
+  echo "$0: " "$@"
 }
 
 debug() {
@@ -243,7 +243,7 @@ debug() {
 
 result () {
   log "result: " "$@"
-  echo "$0: $@"
+  echo "$0: " "$@"
 }
 
 
@@ -675,47 +675,75 @@ pre_checks ()
         mv -f ~/.wubi-move ~/.wubi-move.last
       fi
     else
+      info "Validating --resume option"
       if [ ! -f ~/.wubi-move ]; then
-        error "Option --resume is not allowed"
-        error "Run: bash $0 --help for more info"
+        error "The --resume option can only be used to resume"
+        error "a migration that failed due to copy errors"
+        error "The resume file could not be found."
         exit_script 1
       fi
 # Read previous target partitions - tRoot will will always be present
 # The others may be set to 'none' if they were not used previously
       read tRoot tSwap tBoot tUsr tHome < ~/.wubi-move 2> /dev/null
       okay=true
-      if [ "$tRoot" != "$dev" ]; then
+      if [ "$tRoot" != "$(blkid -c /dev/null -o value -s UUID $dev)" ]; then
+        error "The UUID on target partition "$dev" has changed"
         okay=false
       fi
-      if [ "$tSwap" == "none" ]; then
-        tSwap=""
+      if [ "$tSwap" != "none" ]; then
+        if [ ! -n "$swapdev" ]; then
+          error "The swap partition is no longer present"
+          okay=false
+        elif [ "$tSwap" != "$(blkid -c /dev/null -o value -s UUID $swapdev)" ]; then
+          error "The UUID on swap partition "$swapdev" has changed"
+          okay=false
+        fi
+      elif [ -n "$swapdev" ]; then
+          error "A swap partition cannot be added for a resumed migration"
+          okay=false
       fi
-      if [ "$tBoot" == "none" ]; then
-        tBoot=""
+      if [ "$tBoot" != "none" ]; then
+        if [ ! -n "$bootdev" ]; then
+          error "The /boot partition is no longer present"
+          okay=false
+        elif [ "$tBoot" != "$(blkid -c /dev/null -o value -s UUID $bootdev)" ]; then
+          error "The UUID on /boot partition "$bootdev" has changed"
+          okay=false
+        fi
+      elif [ -n "$bootdev" ]; then
+          error "A /boot partition cannot be added for a resumed migration"
+          okay=false
       fi
-      if [ "$tUsr" == "none" ]; then
-        tUsr=""
+      if [ "$tUsr" != "none" ]; then
+        if [ ! -n "$usrdev" ]; then
+          error "The /usr partition is no longer present"
+          okay=false
+        elif [ "$tUsr" != "$(blkid -c /dev/null -o value -s UUID $usrdev)" ]; then
+          error "The UUID on /usr partition "usrdev" has changed"
+          okay=false
+        fi
+      elif [ -n "$usrdev" ]; then
+          error "A /usr partition cannot be added for a resumed migration"
+          okay=false
       fi
-      if [ "$tHome" == "none" ]; then
-        tHome=""
-      fi
-      if [ "$tSwap" != "$swapdev" ]; then
-        okay=false
-      fi
-      if [ "$tBoot" != "$bootdev" ]; then
-        okay=false
-      fi
-      if [ "$tUsr" != "$usrdev" ]; then
-        okay=false
-      fi
-      if [ "$tHome" != "$homedev" ]; then
-        okay=false
+      if [ "$tHome" != "none" ]; then
+        if [ ! -n "$homedev" ]; then
+          error "The /home partition is no longer present"
+          okay=false
+        elif [ "$tHome" != "$(blkid -c /dev/null -o value -s UUID $homedev)" ]; then
+          error "The UUID on /home partition "$homedev" has changed"
+          okay=false
+        fi
+      elif [ -n "$homedev" ]; then
+          error "A /home partition cannot be added for a resumed migration"
+          okay=false
       fi
       if [ "$okay" == "false" ]; then
         error "The target partitions cannot be changed"
         error "when using the --resume option"
         exit_script 1
       fi
+      info "Resume validated"
       if [ -n "$swapdev" ]; then
           no_mkswap=true
       fi
@@ -877,6 +905,9 @@ pre_checks ()
 }
 
 # validate other target partitions
+# Parameters:
+#   $1 = "home" | "usr" | "boot"
+#   $2 = target partition for /$1
 sanitycheck_other ()
 {
 # create a temp directory to mount the target partition
@@ -887,6 +918,7 @@ sanitycheck_other ()
 # attempt to mount, determine size of target partition
 # check size of directory under current install ($root is either /
 # or the path that a root.disk is mounted under)
+    info "Checking target partition for /"$1""
     if mount -t auto "$2" $other_mount 2> /dev/null; then
       if [ $(ls -1 $other_mount | wc -l) -ne 0 ] ; then
         if [ $(ls -1 $other_mount | wc -l) -gt 1 ] || \
@@ -924,7 +956,7 @@ sanitycheck_other ()
         error "Target partition for /$1 is not big enough"
         error "The current install /$1 is $curr_size K"
         error "The target partition "$2" is $targ_size K"
-        error "There must be at least "$space_buffer" K free space"
+        error "The minimum allowed is "$temp_size" K"
         error "Cancelling"
         exit_script 1 
       fi
@@ -1018,10 +1050,6 @@ sanity_checks ()
         exit_script 1
     fi
 
-    #usr_size=$(du -s "$root_mount"/usr | cut -f 1)
-    #boot_size=$(du -s "$root_mount"/boot | cut -f 1)
-    #root_size=`echo "$size - $home_size - $usr_size - $boot_size" | bc` 
-
     # if migrating to multiple partitions, validate each target (other than root)
     # and reduce the root_size for the main target size check
     root_size=$install_size
@@ -1037,15 +1065,17 @@ sanity_checks ()
     
 # Ensure the target partition is large enough 
 # There must be some free space ($space_buffer)
+    info "Checking target partition for / (root)"
     temp_size=`echo "$root_size + $space_buffer" | bc` 
     if [ $target_size -lt $temp_size ]; then
         error "Target partition ($dev) is not big enough"
-        error "Current install is $root_size K"
+        error "Size of data to migrate is $root_size K"
         error "Total space on target is $target_size K"
         error "There must be at least $space_buffer K free space"
         error "Cancelling"
         exit_script 1
     fi
+    debug "Size of data to migrate to / is "$root_size""
     umount $target
 }
 
@@ -1118,15 +1148,15 @@ format_other ()
     for i in "$homedev" "$bootdev" "$usrdev"; do
       if [ -n "$i" ]; then
         info "Formatting "$i" with "$fs" file system"
-        mkfs."$fs" "$i" > /dev/null
+        mkfs."$fs" "$i" > /dev/null 2> /tmp/wubi-move-error
         if [ "$?" != 0 ]; then
           error "Formatting "$i" failed or was canceled"
+          error "Error is: $(cat /tmp/wubi-move-error)"
           exit_script 1
         fi
       fi
     done
 }
-
 
 # Format the target partition file system
 # Message to close open programs to prevent partial updates
@@ -1150,14 +1180,16 @@ format_partition ()
         fi
       fi    
       info "Formatting $dev with "$fs" file system"
-      mkfs."$fs" $dev > /dev/null
+      mkfs."$fs" $dev > /dev/null 2> /tmp/wubi-move-error
       if [ "$?" != 0 ]; then
         error "Formatting "$dev" failed or was canceled"
-        error "Migration request canceled"
+        error "Error is: $(cat /tmp/wubi-move-error)"
         exit_script 1
       fi
       format_other
     fi
+# garbage collection to refresh cache
+    blkid -g
 }
 
 # Mount separate partitions if required - this is a hack to get it working
@@ -1193,23 +1225,33 @@ mount_other ()
     fi
 }
 
+# Target partition UUID's are saved in the resume file
+# This can be used to resume a migration that fails with
+# an rsync error e.g. file corruption. Once the issue is
+# corrected you can resume (without reformatting and starting
+# from scratch) - so it's important to ensure that the 
+# partitions have not been changed in the interim.
 create_resumefile ()
 {
-      tRoot=$dev
-      tSwap=$swapdev
-      tBoot=$bootdev
-      tUsr=$usrdev
-      tHome=$homedev
-      if [ "$tSwap" == "" ]; then
+      tRoot=$(blkid -c /dev/null -o value -s UUID $dev)
+      if [ -n "$swapdev" ]; then
+        tSwap=$(blkid -c /dev/null -o value -s UUID $swapdev)
+      else
         tSwap="none"
       fi
-      if [ "$tBoot" == "" ]; then
+      if [ -n "$bootdev" ]; then
+        tBoot=$(blkid -c /dev/null -o value -s UUID $bootdev)
+      else
         tBoot="none"
       fi
-      if [ "$tUsr" == "" ]; then
+      if [ -n "$usrdev" ]; then
+        tUsr=$(blkid -c /dev/null -o value -s UUID $usrdev)
+      else
         tUsr="none"
       fi
-      if [ "$tHome" == "" ]; then
+      if [ -n "$homedev" ]; then
+        tHome=$(blkid -c /dev/null -o value -s UUID $homedev)
+      else
         tHome="none"
       fi
       echo "$tRoot $tSwap $tBoot $tUsr $tHome" > ~/.wubi-move
@@ -1485,8 +1527,6 @@ grub_bootloader ()
 # From a grub legacy install this is left to the user to do manually
 update_grub ()
 {
-# garbage collection to refresh cache
-    blkid -g
     if [ -z "$root_disk" ] && [ "$grub_legacy" = "false" ]; then
         echo ""
         info "Updating current grub menu to add new install..."
@@ -1498,6 +1538,7 @@ update_grub ()
 #######################
 ### Main processing ###
 #######################
+debug "Parameters passed: "$@""
 pre_checks
 sanity_checks
 final_questions
