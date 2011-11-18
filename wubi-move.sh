@@ -610,6 +610,28 @@ precheck_other ()
     done
 }
 
+# check partition uuid is the same as saved uuid (for --resume)
+# parameters
+#   $1 = uuid | "none"
+#   $2 = "/usr" | "/home" | "/boot" | "swap"
+#   $3 = device | ""
+resume_precheck ()
+{
+      if [ "$1" != "none" ]; then
+        if [ ! -n "$3" ]; then
+          error "The $2 partition is no longer present"
+          return 1
+        elif [ "$1" != "$(blkid -c /dev/null -o value -s UUID $3)" ]; then
+          error "The UUID on $2 partition $3 has changed"
+          return 1
+        fi
+      elif [ -n "$3" ]; then
+          error "A $2 partition cannot be added for a resumed migration"
+          return 1
+      fi
+      return 0
+}
+
 ### Early checks - must be admin, check target and swap device(s)
 ### Determine migration type - can be a normal Ubuntu install
 ### or a Wubi install (running or from a root.disk)
@@ -661,93 +683,8 @@ pre_checks ()
         exit_script 1
     fi
 
+# precheck separate target partitions for /boot /usr /home
     precheck_other
-
-# When using --resume option, also set --shared-swap (mkswap already run)
-# Make sure that the target partitions are the same as when the resume
-# file was created (with this option we are picking up after rsync errors
-# so no formatting of target partitions, checking they are empty, or that
-# there is enough space - so it's important that the partitions haven't 
-# changed.)
-# If the --resume option is not used, remove the old .wubi-move file.
-    if [ "$resume_prev" != "true" ]; then
-      if [ -f ~/.wubi-move ]; then
-        mv -f ~/.wubi-move ~/.wubi-move.last
-      fi
-    else
-      info "Validating --resume option"
-      if [ ! -f ~/.wubi-move ]; then
-        error "The --resume option can only be used to resume"
-        error "a migration that failed due to copy errors"
-        error "The resume file could not be found."
-        exit_script 1
-      fi
-# Read previous target partitions - tRoot will will always be present
-# The others may be set to 'none' if they were not used previously
-      read tRoot tSwap tBoot tUsr tHome < ~/.wubi-move 2> /dev/null
-      okay=true
-      if [ "$tRoot" != "$(blkid -c /dev/null -o value -s UUID $dev)" ]; then
-        error "The UUID on target partition "$dev" has changed"
-        okay=false
-      fi
-      if [ "$tSwap" != "none" ]; then
-        if [ ! -n "$swapdev" ]; then
-          error "The swap partition is no longer present"
-          okay=false
-        elif [ "$tSwap" != "$(blkid -c /dev/null -o value -s UUID $swapdev)" ]; then
-          error "The UUID on swap partition "$swapdev" has changed"
-          okay=false
-        fi
-      elif [ -n "$swapdev" ]; then
-          error "A swap partition cannot be added for a resumed migration"
-          okay=false
-      fi
-      if [ "$tBoot" != "none" ]; then
-        if [ ! -n "$bootdev" ]; then
-          error "The /boot partition is no longer present"
-          okay=false
-        elif [ "$tBoot" != "$(blkid -c /dev/null -o value -s UUID $bootdev)" ]; then
-          error "The UUID on /boot partition "$bootdev" has changed"
-          okay=false
-        fi
-      elif [ -n "$bootdev" ]; then
-          error "A /boot partition cannot be added for a resumed migration"
-          okay=false
-      fi
-      if [ "$tUsr" != "none" ]; then
-        if [ ! -n "$usrdev" ]; then
-          error "The /usr partition is no longer present"
-          okay=false
-        elif [ "$tUsr" != "$(blkid -c /dev/null -o value -s UUID $usrdev)" ]; then
-          error "The UUID on /usr partition "usrdev" has changed"
-          okay=false
-        fi
-      elif [ -n "$usrdev" ]; then
-          error "A /usr partition cannot be added for a resumed migration"
-          okay=false
-      fi
-      if [ "$tHome" != "none" ]; then
-        if [ ! -n "$homedev" ]; then
-          error "The /home partition is no longer present"
-          okay=false
-        elif [ "$tHome" != "$(blkid -c /dev/null -o value -s UUID $homedev)" ]; then
-          error "The UUID on /home partition "$homedev" has changed"
-          okay=false
-        fi
-      elif [ -n "$homedev" ]; then
-          error "A /home partition cannot be added for a resumed migration"
-          okay=false
-      fi
-      if [ "$okay" == "false" ]; then
-        error "The target partitions cannot be changed"
-        error "when using the --resume option"
-        exit_script 1
-      fi
-      info "Resume validated"
-      if [ -n "$swapdev" ]; then
-          no_mkswap=true
-      fi
-    fi
 
 # swap device must be the correct type
     if [ -n "$swapdev" ] && [ ! -b "$swapdev" ]; then
@@ -775,6 +712,66 @@ pre_checks ()
         error "Option --shared-swap only valid with a swap partition"
         exit_script 1
     fi
+
+# When using --resume option, also set --shared-swap (mkswap already run)
+# Make sure that the target partitions are the same as when the resume
+# file was created (with this option we are picking up after rsync errors
+# so no formatting of target partitions, checking they are empty, or that
+# there is enough space - so it's important that the partitions haven't 
+# changed.)
+# If the --resume option is not used, remove the old .wubi-move file.
+    if [ "$resume_prev" != "true" ]; then
+      if [ -f ~/.wubi-move ]; then
+        mv -f ~/.wubi-move ~/.wubi-move.last
+      fi
+    else
+      info "Validating --resume option"
+      if [ ! -f ~/.wubi-move ]; then
+        error "The --resume option can only be used to resume"
+        error "a migration that failed due to copy errors"
+        error "The resume file could not be found."
+        exit_script 1
+      fi
+# Read previous target partitions - tRoot will will always be present
+# The others may be set to 'none' if they were not used previously
+      read tRoot tSwap tBoot tUsr tHome tError < ~/.wubi-move 2> /dev/null
+      okay=true
+      if [ "$tHome" == "" ] || [ -n "$tError" ]; then
+        error "The resume file is invalid"
+        error "Restart migration without --resume"
+        exit_script 1
+      fi
+      if [ "$tRoot" != "$(blkid -c /dev/null -o value -s UUID $dev)" ]; then
+        error "The UUID on target partition "$dev" has changed"
+        okay=false
+      fi
+      resume_precheck $tSwap "swap" $swapdev
+      if [ "$?" -ne "0" ]; then
+        okay=false;
+      fi
+      resume_precheck $tBoot "/boot" $bootdev
+      if [ "$?" -ne "0" ]; then
+        okay=false;
+      fi
+      resume_precheck $tUsr "/usr" $usrdev
+      if [ "$?" -ne "0" ]; then
+        okay=false;
+      fi
+      resume_precheck $tHome "/home" $homedev
+      if [ "$?" -ne "0" ]; then
+        okay=false;
+      fi
+      if [ "$okay" == "false" ]; then
+        error "The target partitions cannot be changed"
+        error "when using the --resume option"
+        exit_script 1
+      fi
+      info "Resume validated"
+      if [ -n "$swapdev" ]; then
+          no_mkswap=true
+      fi
+    fi
+
     if [ "$no_mkswap" = "true" ]; then
       if [ $(swapon -s | grep "$swapdev"'\ ' | wc -l) -eq 0 ]; then
         swapon $swapdev > /dev/null 2>&1
