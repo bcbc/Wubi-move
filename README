@@ -28,8 +28,8 @@ Migrate an ubuntu install (wubi or normal) to partition
   --usr=</dev/sdXY>       Specify a separate /usr partition
   -c, --check-only        Check only - validate target partition(s)
   --resume                Resume a previous migration attempt that ended
-                          due to copying errors (rsync). No formats or
-                          space checks. Same partitions from before.
+                          due to copying errors (rsync).
+  --synch                 Synchronize a previously migrated install
 
 Assumptions: 
   1. The script will detect automatically whether the current install
@@ -57,6 +57,13 @@ Assumptions:
   6. The script supports migrating from multiple partitions, and also
      to multiple partitions. Separate target partitions are supported
      for /boot, /usr and /home.
+  7. If the migration terminates due to a corrupted file, after fixing, 
+     rerun the script with the --resume option. This picks up from where
+     it left off, potentially saving a lot of time.
+  8. The --synch option will resynchronize a migrated install. New or modified
+     files will be synchronized with the migrated install. CAUTION: files that
+     are only on the target will be deleted.
+
 
 Notes:
   If you install the grub bootloader, then the grub menu from your migrated

@@ -41,6 +41,7 @@ dev=                        # target device for migration
 swapdev=                    # swap device for migration
 rootdiskpath=               # path to root.disk file
 resume_prev=false           # resume previous migration attempt
+resynch_prev=false          # synch a previously migrated install
 homedev=                    # /home device for migration
 bootdev=                    # /boot device for migration
 usrdev=                     # /usr device for migration
@@ -101,8 +102,8 @@ Migrate an ubuntu install (wubi or normal) to partition
   --usr=</dev/sdXY>       Specify a separate /usr partition
   -c, --check-only        Check only - validate target partition(s)
   --resume                Resume a previous migration attempt that ended
-                          due to copying errors (rsync). No formats or
-                          space checks. Same partitions from before.
+                          due to copying errors (rsync).
+  --synch                 Synchronize a previously migrated install
 EOF
 } 
 assumptions_notes () 
@@ -186,6 +187,9 @@ for option in "$@"; do
     ;;
     -c | --check-only)
     check_only=true
+    ;;
+   --synch)
+    resynch_prev=true
     ;;
 ### undocumented debug option
     -d | --debug)
@@ -280,8 +284,8 @@ final_exit ()
     echo ""
     if [ $1 -eq 0 ]; then
       result "Migration completed successfully."
-      if [ -f ~/.wubi-move ]; then
-        mv -f ~/.wubi-move ~/.wubi-move.last
+      if [ -f $HOME/.wubi-move ]; then
+        mv -f $HOME/.wubi-move $HOME/.wubi-move.last
       fi
     else
       result "Migration did not complete successfully."
@@ -632,6 +636,64 @@ resume_precheck ()
       return 0
 }
 
+# Validate --resume and --synch options
+# Both use a save file to match the target partitions, the
+# resume file is on the current install; the synch file is
+# on the target. Other than that they are the same
+#   $1 = "--synch" | "--resume"
+validate_resume_synch ()
+{
+    info "Validating "$1" option"
+    if [ "$1" == "--synch" ]; then
+        check_file="$target""$HOME"/.wubi-move
+    else
+        check_file="$HOME/.wubi-move"
+    fi
+
+    if [ ! -f "$check_file" ]; then
+        error "The "$1" option cannot be used as the"
+        error "control file is missing."
+        exit_script 1
+    fi
+    read tRoot tSwap tBoot tUsr tHome tError < "$check_file" 2> /dev/null
+    okay=true
+    if [ "$tHome" == "" ] || [ -n "$tError" ]; then
+        error "The "$1" option cannot be used as the"
+        error "control file is invalid"
+        exit_script 1
+    fi
+    if [ "$tRoot" != "$(blkid -c /dev/null -o value -s UUID $dev)" ]; then
+        error "The UUID on target partition "$dev" has changed"
+        okay=false
+    fi
+    resume_precheck $tSwap "swap" $swapdev
+    if [ "$?" -ne "0" ]; then
+        okay=false
+
+    fi
+    resume_precheck $tBoot "/boot" $bootdev
+    if [ "$?" -ne "0" ]; then
+        okay=false
+    fi
+    resume_precheck $tUsr "/usr" $usrdev
+    if [ "$?" -ne "0" ]; then
+        okay=false
+    fi
+    resume_precheck $tHome "/home" $homedev
+    if [ "$?" -ne "0" ]; then
+        okay=false
+    fi
+    if [ "$okay" == "false" ]; then
+        error "The target partitions cannot be changed"
+        error "when using the "$1" option"
+        exit_script 1
+    fi
+    info ""$1" option validated"
+    if [ -n "$swapdev" ]; then
+        no_mkswap=true
+    fi
+}
+
 ### Early checks - must be admin, check target and swap device(s)
 ### Determine migration type - can be a normal Ubuntu install
 ### or a Wubi install (running or from a root.disk)
@@ -721,55 +783,11 @@ pre_checks ()
 # changed.)
 # If the --resume option is not used, remove the old .wubi-move file.
     if [ "$resume_prev" != "true" ]; then
-      if [ -f ~/.wubi-move ]; then
-        mv -f ~/.wubi-move ~/.wubi-move.last
+      if [ -f $HOME/.wubi-move ]; then
+        mv -f $HOME/.wubi-move $HOME/.wubi-move.last
       fi
     else
-      info "Validating --resume option"
-      if [ ! -f ~/.wubi-move ]; then
-        error "The --resume option can only be used to resume"
-        error "a migration that failed due to copy errors"
-        error "The resume file could not be found."
-        exit_script 1
-      fi
-# Read previous target partitions - tRoot will will always be present
-# The others may be set to 'none' if they were not used previously
-      read tRoot tSwap tBoot tUsr tHome tError < ~/.wubi-move 2> /dev/null
-      okay=true
-      if [ "$tHome" == "" ] || [ -n "$tError" ]; then
-        error "The resume file is invalid"
-        error "Restart migration without --resume"
-        exit_script 1
-      fi
-      if [ "$tRoot" != "$(blkid -c /dev/null -o value -s UUID $dev)" ]; then
-        error "The UUID on target partition "$dev" has changed"
-        okay=false
-      fi
-      resume_precheck $tSwap "swap" $swapdev
-      if [ "$?" -ne "0" ]; then
-        okay=false;
-      fi
-      resume_precheck $tBoot "/boot" $bootdev
-      if [ "$?" -ne "0" ]; then
-        okay=false;
-      fi
-      resume_precheck $tUsr "/usr" $usrdev
-      if [ "$?" -ne "0" ]; then
-        okay=false;
-      fi
-      resume_precheck $tHome "/home" $homedev
-      if [ "$?" -ne "0" ]; then
-        okay=false;
-      fi
-      if [ "$okay" == "false" ]; then
-        error "The target partitions cannot be changed"
-        error "when using the --resume option"
-        exit_script 1
-      fi
-      info "Resume validated"
-      if [ -n "$swapdev" ]; then
-          no_mkswap=true
-      fi
+      validate_resume_synch "--resume"
     fi
 
     if [ "$no_mkswap" = "true" ]; then
@@ -916,18 +934,20 @@ sanitycheck_other ()
 # check size of directory under current install ($root is either /
 # or the path that a root.disk is mounted under)
     info "Checking target partition for /"$1""
-    if mount -t auto "$2" $other_mount 2> /dev/null; then
-      if [ $(ls -1 $other_mount | wc -l) -ne 0 ] ; then
-        if [ $(ls -1 $other_mount | wc -l) -gt 1 ] || \
-           [ "$(ls $other_mount)" != "lost+found" ]; then
-          error "Partition $2 is not empty. Cancelling"
-          if [ "$debug" = "true" ]; then
-              test_YN "DEBUG mode: do you want to continue anyway?"
-              if [ $? -ne 0 ]; then
-                  exit_script 1
-              fi
-          else
-             exit_script 1
+     if mount -t auto "$2" $other_mount 2> /dev/null; then
+       if [ "$resume_prev" != "true" ]; then # skip check if --resume or --synch
+        if [ $(ls -1 $other_mount | wc -l) -ne 0 ] ; then
+          if [ $(ls -1 $other_mount | wc -l) -gt 1 ] || \
+             [ "$(ls $other_mount)" != "lost+found" ]; then
+            error "Partition $2 is not empty. Cancelling"
+            if [ "$debug" = "true" ]; then
+                test_YN "DEBUG mode: do you want to continue anyway?"
+                if [ $? -ne 0 ]; then
+                    exit_script 1
+                fi
+            else
+               exit_script 1
+            fi
           fi
         fi
       fi
@@ -980,13 +1000,19 @@ sanity_checks ()
 # have to format first
     echo ""
     if mount -t auto "$dev" $target 2> /dev/null; then
-        if [ "$resume_prev" = "true" ]; then
-           # For --resume the size checks are already completed
-           umount $target
-           return 0
+# User wants to resynch a previous migrated install (useful for maintaining
+# a bootable backup on an external drive)
+# resuming and synching are similar - no format of target partitions
+# a valid synch file must exist on target with exact matching partition UUID(s)
+        if [ "$resynch_prev" = "true" ]; then
+          resume_prev=true
+          validate_resume_synch "--synch"
         fi
 
-        if [ $(ls -1 $target | wc -l) -ne 0 ] ; then
+# If --resume or --synch it's expected that the target partition(s) are not
+# empty - otherwise, they have to be empty.
+        if [ "$resume_prev" != "true" ]; then # skip check if --resume or --synch
+         if [ $(ls -1 $target | wc -l) -ne 0 ] ; then
           if [ $(ls -1 $target | wc -l) -gt 1 ] || \
              [ "$(ls $target)" != "lost+found" ]; then
             error "Partition $dev is not empty. Cancelling"
@@ -999,6 +1025,7 @@ sanity_checks ()
                exit_script 1
             fi
           fi
+         fi
         fi
     else
         info "Partition $dev could not be mounted for validation."
@@ -1086,7 +1113,15 @@ final_questions ()
     fi
     if [ "$resume_prev" = "true" ]; then
       info "The previous migration attempt to "$dev""
-      info "will be resumed."
+      if [ "$resynch_prev" = "true" ]; then
+        info "will be resynchronized."
+        info "CAUTION: files that have been deleted on the"
+        info "current install will also be deleted on the"
+        info "target. This includes files that were added"
+        info "only to the target."
+      else
+        info "will be resumed."
+      fi
       if [ "$no_bootloader" = "true" ] ; then
         test_YN "Continue without installing the bootloader? (Y/N)"
       else
@@ -1251,7 +1286,7 @@ create_resumefile ()
       else
         tHome="none"
       fi
-      echo "$tRoot $tSwap $tBoot $tUsr $tHome" > ~/.wubi-move
+      echo "$tRoot $tSwap $tBoot $tUsr $tHome" > $HOME/.wubi-move
 }
 
 # Copy entire install to target partition
