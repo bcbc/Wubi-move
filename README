@@ -7,10 +7,11 @@ The first version updated the wubi-move-to-partition script to correct a few pro
 
 The current version adds the following features:
 1. Supports migration of a normal (non-wubi) Ubuntu install. This can be useful to create a working backup, move your installation between computers, or create a working copy to experiment with.
-2. Supports migration of a Wubi install from just the root.disk file (option --root-disk= ). This can be performed from an Ubuntu live CD/USB or another Ubuntu install. The named root.disk must be a fully-contained, working Wubi install, or if there are separate virtual disks for /home and /usr these must be in the same directory as the root.disk. (This option does not support Wubi with grub-legacy i.e. original installed prior to the 9.10 release).
+2. Supports migration of a Wubi install from just the root.disk file (option --root-disk= ). This can be performed from an Ubuntu live CD/USB or another Ubuntu install. The named root.disk must be a fully-contained, working Wubi install, or if there are separate virtual disks for /home and /usr these must be in the same directory as the root.disk. (This option does not support Wubi with grub-legacy i.e. originally installed prior to the 9.10 release).
 3. It supports migration of a Wubi or Normal install that uses grub-legacy - however it will replace grub-legacy with Grub2 (only on the migrated install). It does not update the current install's menu.lst so it is recommended to always install the Grub2 bootloader (or modify menu.lst manually).
 4. The option --shared-swap can be used if you will be sharing an existing swap partition with another install. It bypasses the 'mkswap' command to avoid modifying the UUID.
-
+5. It supports the ability to migrate to separate /boot, /usr and /home partitions.
+6. It suppors the ability to synchronize a migrated install (e.g. for a bootable backup)
 
 Usage: sudo bash wubi-move.sh [OPTION] target_partition [swap_partition]
        e.g. sudo bash wubi-move.sh /dev/sda5 /dev/sda6
@@ -59,10 +60,12 @@ Assumptions:
      for /boot, /usr and /home.
   7. If the migration terminates due to a corrupted file, after fixing, 
      rerun the script with the --resume option. This picks up from where
-     it left off, potentially saving a lot of time.
+     it left off, potentially saving a lot of time. The target partitions
+     must be the same as in the prior run.
   8. The --synch option will resynchronize a migrated install. New or modified
-     files will be synchronized with the migrated install. CAUTION: files that
-     are only on the target will be deleted.
+     files will be synchronized with the migrated install. The target partitions
+     must be the same as in the previous migration. CAUTION: files that have
+     been added only on the target will be deleted.
 
 
 Notes:

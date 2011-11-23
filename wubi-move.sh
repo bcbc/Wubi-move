@@ -48,7 +48,7 @@ usrdev=                     # /usr device for migration
 check_only=false            # just do checks - no changes
 
 # Literals 
-version=2.1.1               # Script version
+version=2.2                 # Script version
 target=/tmp/wubi-move/target        # target device mountpoint
 root_mount=/tmp/wubi-move/rootdisk  # root.disk source mountpoint
 other_mount=/tmp/wubi-move/other    # used to check other target partitions
@@ -63,7 +63,6 @@ wubi_install=true           # Is this a Wubi install migration?
 internet_connection=false   # Is there an internet connection present?
 suppress_chroot_output=true # Default - suppress output of chroot commands
 grub_common_exists=true     # Check for grub-common (not on 8.04)
-mint=false                  # mint4win
 
 # Working variables
 fs=ext4                     # Default file system - else ext3 if detected on install being migrated
@@ -77,11 +76,6 @@ mtpt=                       # Mount point determination working variable
 awkscript=                  # Contains AWK script
 target_size=                # size of target partition
 install_size=               # size of current install
-tRoot=                      # Validate --resume option - same partition for /
-tSwap=                      # Validate --resume option - same partition for swap
-tBoot=                      # Validate --resume option - same partition for /boot
-tUsr=                       # Validate --resume option - same partition for /usr
-tHome=                      # Validate --resume option - same partition for /home
 
 usage () 
 {
