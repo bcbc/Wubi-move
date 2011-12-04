@@ -444,6 +444,7 @@ check_fstab ()
 # The onus is on the user to have a working Wubi root.disk
 root_disk_migration () 
 {
+    debug "Checking --root-disk option"
     if [ ! -f "$root_disk" ]; then
         error "root disk not found: "$root_disk""
         exit_script 1
@@ -505,6 +506,7 @@ root_disk_migration ()
       error "You need to migrate from a 32-bit environment"
       exit_script 1
     fi
+    debug "Validated --root-disk option"
 }
 
 ### Determine whether this is a wubi install or not
@@ -587,6 +589,48 @@ check_wubi ()
     fi
 }
 
+# Check partition - user friendly checks to let users know if they've selected
+# a drive or an extended partition; then make sure it's type '83'
+# Bypass check for GPT for now. (fdisk kicks out an error for GPT)
+# Parameters:
+#   $1 = partition
+#   $2 = type ( "83" or "82")
+check_partition_type ()
+{
+    partition_disk=${1%%[0-9]*}
+    if [ "$1" = "$partition_disk" ]; then
+        error "target_partition "$1" is a drive, not a partition."
+        exit_script 1
+    fi
+    if [ $(fdisk -l "$partition_disk" 2> /dev/null | grep -i "GPT" | grep "[ \t]ee[ \t]" | wc -l) -ne 0 ]; then
+    # bypass GPT disks - assume okay
+        return
+    fi 
+    if [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]5[ \t]" | grep -i "Extended" | wc -l) -eq 1 ]; then
+        error "target_partition "$1" is an Extended partition."
+        exit_script 1
+    fi
+    if [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]f[ \t]" | grep -i "W95 Ext'd (LBA)" | wc -l) -eq 1 ]; then
+        error "target_partition "$1" is an Extended partition."
+        exit_script 1
+    fi
+    if [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]85[ \t]" | grep -i "Linux extended" | wc -l) -eq 1 ]; then
+        error "target_partition "$1" is an Extended partition."
+        exit_script 1
+    fi
+    if  [ "$2" == "83" ]; then
+      if [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]"$2"[ \t]" | grep -i "Linux" | wc -l) -eq 0 ]; then
+        error "partition "$1" must be type "$2" - Linux."
+        exit_script 1
+      fi
+    else
+      if [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]"$2"[ \t]" | grep -i "Linux swap" | wc -l) -eq 0 ]; then
+        error "partition "$1" must be type "$2" - Linux swap."
+        exit_script 1
+      fi
+    fi
+}
+
 ### other device prechecks
 precheck_other ()
 {
@@ -600,10 +644,7 @@ precheck_other ()
           error ""$i" is not a block device."
           exit_script 1
         fi
-        if [ $(fdisk -l | grep "$i[ \t]" | grep "[ \t]83[ \t]" | grep -i "Linux" | wc -l) -eq 0 ]; then
-          error "partition "$i" must be type 83 - Linux."
-          exit_script 1
-        fi
+        check_partition_type $i "83"
       fi
     done
 }
@@ -708,31 +749,7 @@ pre_checks ()
 # determine drive of target partition - make sure the user hasn't 
 # specified the drive instead of the partition
     disk=${dev%%[0-9]*}
-    if [ "$disk" = "$dev" ]; then
-        error "target_partition "$dev" is a drive, not a partition."
-        exit_script 1
-    fi
-    if [ $(fdisk -l | grep "$dev[ \t]" | grep "[ \t]5[ \t]" | grep -i "Extended" | wc -l) -eq 1 ]; then
-        error "target_partition "$dev" is an Extended partition."
-        exit_script 1
-    fi
-    if [ $(fdisk -l | grep "$dev[ \t]" | grep "[ \t]f[ \t]" | grep -i "W95 Ext'd (LBA)" | wc -l) -eq 1 ]; then
-        error "target_partition "$dev" is an Extended partition."
-        exit_script 1
-    fi
-    if [ $(fdisk -l | grep "$dev[ \t]" | grep "[ \t]85[ \t]" | grep -i "Linux extended" | wc -l) -eq 1 ]; then
-        error "target_partition "$dev" is an Extended partition."
-        exit_script 1
-    fi
-# hard check - partition type must be "83 - Linux" 
-# previous version of script will happily use e.g. an ntfs partition in which case you end up
-# with a partition type ntfs and a file system ext3/4. For future sanity and to avoid confusion
-# the partition should be prepared correctly beforehand. My own attempts to modify it to 83 in the
-# scripts with sfdisk have proven to be dangerous.
-    if [ $(fdisk -l | grep "$dev[ \t]" | grep "[ \t]83[ \t]" | grep -i "Linux" | wc -l) -eq 0 ]; then
-        error "target_partition "$dev" must be type 83 - Linux."
-        exit_script 1
-    fi
+    check_partition_type "$dev" "83"
 
     if [ $(mount | grep "$dev"'\ ' | wc -l) -ne 0 ]; then
         error ""$dev" is mounted - please unmount and try again"
@@ -751,10 +768,7 @@ pre_checks ()
 # Blkid will report type "swap" or "swsuspend", the latter if
 # the swap partition contains a hibernated image.
     if [ -b "$swapdev" ]; then
-        if [ $(fdisk -l | grep "$swapdev[ \t]" | grep "[ \t]82[ \t]" | grep -i "Linux swap" | wc -l) -eq 0 ]; then
-            error ""$swapdev" is not a swap partition"
-            exit_script 1
-        fi
+        check_partition_type "$swapdev" "82"
         if [ "$(blkid -c /dev/null -o value -s TYPE "$swapdev")" = "swsuspend" ]; then
             error ""$swapdev" contains a hibernated image"
             exit_script 1
