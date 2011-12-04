@@ -704,7 +704,6 @@ validate_resume_synch ()
     resume_precheck $tSwap "swap" $swapdev
     if [ "$?" -ne "0" ]; then
         okay=false
-
     fi
     resume_precheck $tBoot "/boot" $bootdev
     if [ "$?" -ne "0" ]; then
@@ -1294,7 +1293,7 @@ create_resumefile ()
       else
         tHome="none"
       fi
-      echo "$tRoot $tSwap $tBoot $tUsr $tHome" > $HOME/.wubi-move
+      echo "$tRoot $tSwap $tBoot $tUsr $tHome" > "$HOME"/.wubi-move
 }
 
 # Copy entire install to target partition
@@ -1324,9 +1323,10 @@ migrate_files ()
         sleep 3
         exit_script 1
     fi
-
+    # When migrating from a live CD, the .wubi-move hasn't been copied
+    # For a normal migration it's already copied. This supports the --synch option
+    cp -n "$HOME"/.wubi-move "$target""$HOME"/.wubi-move
     if [ "$wubi_install" = "true" ]; then
-#      mkdir $target/host
       chmod -x $target/etc/grub.d/10_lupin > /dev/null 2>&1
     fi    
 } 
