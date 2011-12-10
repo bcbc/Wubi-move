@@ -46,6 +46,7 @@ homedev=                    # /home device for migration
 bootdev=                    # /boot device for migration
 usrdev=                     # /usr device for migration
 check_only=false            # just do checks - no changes
+edit_fail=false             # set to true if edit checks failed
 
 # Literals 
 version=2.2                 # Script version
@@ -60,7 +61,6 @@ formatted_dev=false         # Has the target been formatted?
 grub_legacy=false           # Is grub legacy installed?
 install_grub=false          # Must the grub2 bootloader be installed?
 wubi_install=true           # Is this a Wubi install migration?
-internet_connection=false   # Is there an internet connection present?
 suppress_chroot_output=true # Default - suppress output of chroot commands
 grub_common_exists=true     # Check for grub-common (not on 8.04)
 
@@ -222,7 +222,8 @@ log() {
 
 error() {
   log "error: " "$@"
-  echo "$0: " "$@"
+  echo "$0: " "$@" 1>&2
+  edit_fail=true
 }
 
 info() {
@@ -314,11 +315,6 @@ cleanup_for_exit ()
       [ -d "$root_mount" ] && rmdir "$root_mount" > /dev/null 2>&1
     fi
 
-## If a wubi install is being migrated, remove the fake /host
-## created to bypass grub errors. Do this before unmounting
-#    if [ "$wubi_install" = "true" ] && [ -d "$target"/host ]; then
-#      rmdir "$target"/host > /dev/null 2>&1
-#    fi
 
 # Now unmount migrated install if required and delete main mountpoint
 # If migrating to separate partitions, unmount first but leave these
@@ -454,8 +450,6 @@ root_disk_migration ()
         error "You cannot use --no-bootloader with --root-disk"
         exit_script 1
     fi
-    install_grub=true
-
 
 # mount the root.disk and check it is a fully contained install
 # or else the /etc/fstab links to additional virtual disks and 
@@ -510,7 +504,7 @@ root_disk_migration ()
 }
 
 ### Determine whether this is a wubi install or not
-### Returns 0: Wubi, 1: Not wubi
+### Returns 0: Wubi, 1: Normal, 2: some other loop install (mint4win?)
 check_wubi ()
 {
 # first check for a root_disk - always wubi
@@ -519,6 +513,10 @@ check_wubi ()
         return 0 # wubi
     fi
 
+# Ubuntu releases prior to 9.10 don't support ext4 (default)
+    if ! type mkfs.ext4 > /dev/null 2>&1 ; then
+        fs=ext3
+    fi
 # Identify root device - looking for /dev/loop , and then identify the loop file (root.disk)
 # Note for Grub legacy, the /boot device is the windows host. 
 # For releases without grub-probe the mount output directly refers to root.disk on Wubi
@@ -599,34 +597,23 @@ check_partition_type ()
 {
     partition_disk=${1%%[0-9]*}
     if [ "$1" = "$partition_disk" ]; then
-        error "target_partition "$1" is a drive, not a partition."
-        exit_script 1
-    fi
-    if [ $(fdisk -l "$partition_disk" 2> /dev/null | grep -i "GPT" | grep "[ \t]ee[ \t]" | wc -l) -ne 0 ]; then
-    # bypass GPT disks - assume okay
-        return
-    fi 
-    if [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]5[ \t]" | grep -i "Extended" | wc -l) -eq 1 ]; then
-        error "target_partition "$1" is an Extended partition."
-        exit_script 1
-    fi
-    if [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]f[ \t]" | grep -i "W95 Ext'd (LBA)" | wc -l) -eq 1 ]; then
-        error "target_partition "$1" is an Extended partition."
-        exit_script 1
-    fi
-    if [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]85[ \t]" | grep -i "Linux extended" | wc -l) -eq 1 ]; then
-        error "target_partition "$1" is an Extended partition."
-        exit_script 1
-    fi
-    if  [ "$2" == "83" ]; then
+        error "partition "$1" is a drive, not a partition."
+    elif [ $(fdisk -l "$partition_disk" 2> /dev/null | grep -i "GPT" | grep "[ \t]ee[ \t]" | wc -l) -ne 0 ]; then
+    # bypass GPT disks - doesn't apply
+        true
+    elif [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]5[ \t]" | grep -i "Extended" | wc -l) -eq 1 ]; then
+        error "partition "$1" is an Extended partition."
+    elif [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]f[ \t]" | grep -i "W95 Ext'd (LBA)" | wc -l) -eq 1 ]; then
+        error "partition "$1" is an Extended partition."
+    elif [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]85[ \t]" | grep -i "Linux extended" | wc -l) -eq 1 ]; then
+        error "partition "$1" is an Extended partition."
+    elif [ "$2" == "83" ]; then
       if [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]"$2"[ \t]" | grep -i "Linux" | wc -l) -eq 0 ]; then
         error "partition "$1" must be type "$2" - Linux."
-        exit_script 1
       fi
     else
       if [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]"$2"[ \t]" | grep -i "Linux swap" | wc -l) -eq 0 ]; then
         error "partition "$1" must be type "$2" - Linux swap."
-        exit_script 1
       fi
     fi
 }
@@ -638,11 +625,9 @@ precheck_other ()
       if [ -n "$i" ]; then
         if [ $(mount | grep "$i"'\ ' | wc -l) -ne 0 ]; then
           error ""$i" is mounted - please unmount and try again"
-          exit_script 1
         fi
         if [ ! -b "$i" ]; then
           error ""$i" is not a block device."
-          exit_script 1
         fi
         check_partition_type $i "83"
       fi
@@ -729,49 +714,41 @@ validate_resume_synch ()
 }
 
 ### Early checks - must be admin, check target and swap device(s)
-### Determine migration type - can be a normal Ubuntu install
-### or a Wubi install (running or from a root.disk)
-pre_checks ()
+### For resume option confirm the targets are the same
+### Also check for mounted partitions that aren't excluded by the script
+check_targets ()
 {
-    if [ "$(whoami)" != root ]; then
-      error "Admin rights are required to run this program."
-      exit 1  # exit immediately no cleanup required
-    fi
-
 # target device must be a non-empty string and a block device
 # make sure the device is not mounted already
+    disk=${dev%%[0-9]*}
     if [ -z "$dev" ] || [ ! -b "$dev" ]; then
         error "target_partition ("$dev") must be a valid partition."
-        exit_script 1
-    fi
-
-# determine drive of target partition - make sure the user hasn't 
+    else
+# determine drive of target partition - make sure the user hasn't
 # specified the drive instead of the partition
-    disk=${dev%%[0-9]*}
-    check_partition_type "$dev" "83"
+        check_partition_type "$dev" "83"
 
-    if [ $(mount | grep "$dev"'\ ' | wc -l) -ne 0 ]; then
-        error ""$dev" is mounted - please unmount and try again"
-        exit_script 1
+        if [ $(mount | grep "$dev"'\ ' | wc -l) -ne 0 ]; then
+            error ""$dev" is mounted - please unmount and try again"
+        fi
     fi
 
 # precheck separate target partitions for /boot /usr /home
     precheck_other
 
-# swap device must be the correct type
-    if [ -n "$swapdev" ] && [ ! -b "$swapdev" ]; then
+# if swap device present must be a block device
+    if [ -n "$swapdev" ]; then
+      if [ ! -b "$swapdev" ]; then
         error "swapdevice ("$swapdev") is not a block device."
-        exit_script 1
-    fi
+      else
 # swap partition type is '82 - Linux swap / Solaris'
 # Blkid will report type "swap" or "swsuspend", the latter if
 # the swap partition contains a hibernated image.
-    if [ -b "$swapdev" ]; then
         check_partition_type "$swapdev" "82"
         if [ "$(blkid -c /dev/null -o value -s TYPE "$swapdev")" = "swsuspend" ]; then
-            error ""$swapdev" contains a hibernated image"
-            exit_script 1
+          error ""$swapdev" contains a hibernated image"
         fi
+      fi
     fi
 # Option --shared-swap is when you want to share the swap partition that is 
 # already in use by another install. So you want to avoid running mkswap as
@@ -779,7 +756,6 @@ pre_checks ()
 # So make sure a) a swap partition has been supplied, and b) that is is valid
     if [ -z "$swapdev" ] && [ "$no_mkswap" = "true" ]; then
         error "Option --shared-swap only valid with a swap partition"
-        exit_script 1
     fi
 
 # When using --resume option, also set --shared-swap (mkswap already run)
@@ -803,7 +779,6 @@ pre_checks ()
         if [ $? -ne 0 ]; then 
             error ""$swapdev" is not an existing swap partition"
             error "Option --shared-swap cannot be used"
-            exit_script 1
         else
           swapoff $swapdev > /dev/null 2>&1
         fi
@@ -838,27 +813,31 @@ pre_checks ()
                 error "The migration script does not automatically"
                 error "exclude this mountpoint."
                 error "Please unmount "$MTPT" and try again."
-                exit_script 1
                 ;;
             esac
           ;;
         esac
       done < /proc/mounts
     fi
+}
 
-# Ubuntu releases prior to 9.10 don't support ext4 (default)
-    if ! type mkfs.ext4 > /dev/null 2>&1 ; then
-        fs=ext3
-    fi
-
+# Identify migration source and validate
+# Can be a wubi install, a standalone root.disk (and other virtual disks),
+# a normal ubuntu install - also check whether the install has grub-legacy
+# installed.
+check_migration_source ()
+{
 # Check whether we're migrating a Wubi install or normal install.
 # The Wubi install can either be running or a root.disk file
     check_wubi
     rc="$?"
-    if [ "$rc" -ne "0" ]; then
+    wubi_install=true
+    if [ "$rc" -eq "0" ]; then
+      debug "Wubi-install migration"
+    elif [ "$rc" -eq "1" ]; then
       wubi_install=false
-    fi
-    if [ "$rc" -eq "2" ]; then
+      debug "Normal (non-Wubi) install migration"
+    elif [ "$rc" -eq "2" ]; then
       error "Unsupported Wubi install (irregular root.disk or mountpoint)"
       exit_script 1
     fi
@@ -868,13 +847,6 @@ pre_checks ()
 
 # make sure the mountpoint is not in use
     umount $target 2> /dev/null
-
-# check whether connected to internet - required when converting
-# a grub-legacy install to grub2.
-    ping -c 1 google.com > /dev/null 2>&1
-    if [ "$?" -eq 0 ]; then         
-        internet_connection=true
-    fi
 
 # If this isn't a root.disk install, check
 # which version of grub is installed.
@@ -889,32 +861,19 @@ pre_checks ()
           grub_legacy=true
       fi        
       if [ "$grub_legacy" = "true" ]; then
-        if [ "$internet_connection" = "false" ]; then
-          error "You need an active internet connection to replace"
-          error "Grub legacy with Grub2 on the migrated install"
-          exit_script 1
-        fi
+        debug "Grub-legacy detected on migration source"
         info "Grub (legacy) is installed - this will be replaced"
         info "with Grub2 (only on the migrated install)."
-        if [ "$no_bootloader" = "true" ]; then
-          info "You have selected --no-bootloader with grub-legacy"
-          info "You will have to manually modify your current grub"
-          info "menu.lst to boot the migrated install."
-        else
-          info "The Grub2 bootloader will be installed on "$disk""
-          install_grub=true
+        # check whether connected to internet - required when converting
+        # a grub-legacy install to grub2.
+        ping -c 1 google.com > /dev/null 2>&1
+        if [ "$?" -ne 0 ]; then         
+          error "You need an active internet connection to replace"
+          error "Grub legacy with Grub2 on the migrated install"
         fi
         # grub legacy wubi is always ext3
         if [ "$wubi_install" = "true" ]; then
           fs=ext3
-        fi
-        if [ "$assume_yes" = "false" ] ; then
-          test_YN "Continue and replace Grub legacy? (Y/N)"
-          # User pressed N
-          if [ "$?" -eq "1" ]; then
-            info "Migration request canceled by user"
-            exit_script 1
-          fi
         fi
         # for old installs (8.04, 8.10?) there is no grub-common package
         if dpkg -s grub-common > /dev/null 2>&1; then
@@ -986,6 +945,7 @@ sanitycheck_other ()
       fi
       root_size=`echo "$root_size - $curr_size" | bc`
       debug "Remaining size of / reduced to: $root_size"
+      sleep 2
       umount $other_mount
     else
         error "Partition $2 could not be mounted for validation."
@@ -1000,17 +960,14 @@ sanitycheck_other ()
 sanity_checks ()
 {
 # try and mount target partition, and ensure that it is empty
-# (note freshly formatted ext2/3/4 contain a single 'lost and found'
-# and freshly formatted ntfs contains a "System Volume Information")
-# Checks are performed prior to formatting if possible, however,
-# if the mount fails, it could be unformatted in which case we
-# have to format first
+# (note freshly formatted ext2/3/4 contain a single 'lost and found')
     echo ""
     if mount -t auto "$dev" $target 2> /dev/null; then
-# User wants to resynch a previous migrated install (useful for maintaining
-# a bootable backup on an external drive)
-# resuming and synching are similar - no format of target partitions
-# a valid synch file must exist on target with exact matching partition UUID(s)
+
+        # If user wants to resynch a previous migrated install (useful for maintaining
+        # a bootable backup on an external drive) a valid synch file must exist on target
+        # with exact matching partition UUID(s). 
+        # Resuming and synching are similar - no format of target partitions
         if [ "$resynch_prev" = "true" ]; then
           resume_prev=true
           validate_resume_synch "--synch"
@@ -1035,27 +992,10 @@ sanity_checks ()
          fi
         fi
     else
-        info "Partition $dev could not be mounted for validation."
-        info "This is normal if the partition is unformatted or the file"
-        info "system is corrupted. It could also mean you have entered"
-        info "the wrong partition. The partition will have to be formatted"
-        info "in order to complete validation."
-        info "PLEASE MAKE SURE YOU HAVE SELECTED THE CORRECT PARTITION."
-        # have to interrupt if the user has select --assume-yes, otherwise the
-        # format_partition function will ask to continue.
-        if [ "$check_only" = "true" ]; then
-          exit_script 1
-        fi
-        if [ "$assume_yes" = "true" ]; then
-          test_YN "Continue? (Y/N)"
-          # User pressed N
-          if [ "$?" -eq "1" ]; then
-            info "Migration request canceled by user"
-            exit_script 1
-          fi
-        fi
-        format_partition
-        mount $dev $target
+        error "Partition $dev could not be mounted for validation."
+        error "This can occur if the partition is unformatted or the file"
+        error "system is corrupted. "
+        exit_script 1
     fi
 
 # Determine the install size to be migrated and the total size of the target
@@ -1114,69 +1054,60 @@ sanity_checks ()
 ### migration can proceed unattended
 final_questions ()
 {
+# --check-only : nothing further to do.
     if [ "$check_only" = "true" ]; then
       info "Option --check-only: All tests succeeded"
       exit_script 0
     fi
+
+    install_grub=true
+    if [ "$no_bootloader" = "true" ]; then
+      install_grub=false
+    fi
+
+# --assume-yes = non-interactive (only grub-legacy upgrade will prompt)
+    if [ "$assume_yes" = "true" ] ; then
+      return 0
+    fi
+    echo ""
     if [ "$resume_prev" = "true" ]; then
-      info "The previous migration attempt to "$dev""
       if [ "$resynch_prev" = "true" ]; then
+        info "The previous migration to "$dev""
         info "will be resynchronized."
         info "CAUTION: files that have been deleted on the"
         info "current install will also be deleted on the"
         info "target. This includes files that were added"
         info "only to the target."
       else
+        info "The previous migration attempt to "$dev""
         info "will be resumed."
       fi
-      if [ "$no_bootloader" = "true" ] ; then
-        test_YN "Continue without installing the bootloader? (Y/N)"
-      else
-        install_grub=true
-        test_YN "Continue and install Grub2 to "$disk?" (Y/N)"
+      test_YN "Proceed (Y/N)"
+    else
+      if [ "$no_bootloader" = "true" ]; then
+      # grub-legacy bit
+        if [ "$grub_legacy" = "true" ]; then
+          info "You have selected --no-bootloader with grub-legacy"
+          info "You will have to manually modify your current grub"
+          info "menu.lst to boot the migrated install."
+        else
+          info "You have selected --no-bootloader which means the"
+          info "Grub2 bootloader will not be installed. You can boot"
+          info "the migrated install from your current install."
+          if [ "$wubi_install" = "true" ]; then
+            info "Make sure you install the Grub2 bootloader before"
+            info "uninstalling your Wubi install."
+          fi
+        fi
       fi
-      # User pressed N
-      if [ "$?" -eq "1" ]; then
-        info "User canceled resume attempt."
-        exit_script 1 
-      fi
-      return 0
+      info "Please close all open files before continuing."
+      info "About to format the target partition ($dev)."
+      test_YN "Proceed with format (Y/N)"
     fi
-
-    # Already notified grub-legacy users about grub2 upgrade
-    if [ "$grub_legacy" = "true" ] ; then
-       return 0
-    fi
-    # No opt out for --root-disk= option, but user can cancel migration
-    if [ ! -z "$root_disk" ] ; then
-      info "The Grub2 bootloader will be installed to "$disk"."
-      info "This is required when a migration is performed"
-      info "from a named root.disk file."
-      test_YN "Continue and install Grub2 to "$disk?" (Y/N)"
-      # User pressed N
-      if [ "$?" -eq "1" ]; then
-        info "User canceled migration."
-        exit_script 1 
-      fi
-      return 0
-    fi
-    if [ "$no_bootloader" = "true" ] ; then
-       return 0
-    fi
-    if [ "$assume_yes" = "true" ] ; then
-       install_grub=true
-       return 0
-    fi
-
-    echo ""        
-    info "Would you like the grub2 bootloader to be installed"
-    info "to drive "$disk"? If you choose not to, you will"
-    info "still be able to boot your migrated install from"
-    info "your current install."
-    test_YN "Install grub bootloader to "$disk?" (Y/N)"
-    # User pressed Y
-    if [ "$?" -eq "0" ]; then
-      install_grub=true 
+    # User pressed N
+    if [ "$?" -eq "1" ]; then
+      info "Migration request canceled by user"
+      exit_script 1
     fi
 }
 
@@ -1208,16 +1139,6 @@ format_partition ()
 
     if [ "$formatted_dev" != true ] ; then
       formatted_dev="true"
-      if [ "$assume_yes" != true ] ; then
-        info "Please close all open files before continuing."
-        info "About to format the target partition ($dev)."
-        test_YN "Proceed with format (Y/N)"
-        # User pressed N
-        if [ "$?" -eq "1" ]; then
-          info "Migration request canceled by user"
-          exit_script 1
-        fi
-      fi    
       info "Formatting $dev with "$fs" file system"
       mkfs."$fs" $dev > /dev/null 2> /tmp/wubi-move-error
       if [ "$?" != 0 ]; then
@@ -1579,7 +1500,15 @@ update_grub ()
 ### Main processing ###
 #######################
 debug "Parameters passed: "$@""
-pre_checks
+if [ "$(whoami)" != root ]; then
+   error "Admin rights are required to run this program."
+   exit 1  # exit immediately no cleanup required
+fi
+check_targets
+check_migration_source
+if  [ "$edit_fail" == "true" ]; then
+    exit_script 1
+fi
 sanity_checks
 final_questions
 format_partition
