@@ -47,6 +47,7 @@ bootdev=                    # /boot device for migration
 usrdev=                     # /usr device for migration
 check_only=false            # just do checks - no changes
 edit_fail=false             # set to true if edit checks failed
+source_only=false           # just check what the migration source (current install)
 
 # Literals 
 version=2.2                 # Script version
@@ -184,6 +185,9 @@ for option in "$@"; do
     ;;
    --synch)
     resynch_prev=true
+    ;;
+   --migration-source)
+    source_only=true
     ;;
 ### undocumented debug option
     -d | --debug)
@@ -885,6 +889,28 @@ check_migration_source ()
     fi
 }
 
+pre_checks ()
+{
+  if [ "$(whoami)" != root ]; then
+    error "Admin rights are required to run this program."
+    exit 1  # exit immediately no cleanup required
+  fi
+#  case "$input" in 
+#        "y" | "Y" )
+#          return 0 ;;
+#        "n" | "N" )
+#          return 1 ;;
+#        * )
+#          warn "Invalid response ('$input')"
+#      esac
+#
+#if [ "$source_only" != "true" ]; then
+    check_targets
+#fi
+check_migration_source
+}
+
+
 # validate other target partitions
 # Parameters:
 #   $1 = "home" | "usr" | "boot"
@@ -1500,12 +1526,7 @@ update_grub ()
 ### Main processing ###
 #######################
 debug "Parameters passed: "$@""
-if [ "$(whoami)" != root ]; then
-   error "Admin rights are required to run this program."
-   exit 1  # exit immediately no cleanup required
-fi
-check_targets
-check_migration_source
+pre_checks
 if  [ "$edit_fail" == "true" ]; then
     exit_script 1
 fi
