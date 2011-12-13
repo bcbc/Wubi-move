@@ -2,11 +2,6 @@
 #
 ### Variable declaration ###
 #
-# Options 
-no_bootloader=false         # Bypass Grub2 bootloader install
-no_mkswap=false             # Skip mkswap on swap partition
-assume_yes=false            # Assume "Y" to all prompts
-root_disk=                  # path and name of root.disk file 
 empty=false
 debug=false                 # Output debug information
 dev=                        # target device for migration
@@ -15,17 +10,13 @@ homedev=                    # /home device for migration
 bootdev=                    # /boot device for migration
 usrdev=                     # /usr device for migration
 edit_fail=false             # set to true if edit checks failed
-source_only=false           # just check what the migration source (current install)
-
-# Literals 
 other_mount=/tmp/wubi-move/other    # used to check other target partitions
-
-# Working variables
 rc=                         # Preserve return code
 root_size=                  # size of target partition
 boot_size=                  # size of target partition
 home_size=                  # size of target partition
 usr_size=                   # size of target partition
+target_size=                # working variable
 
 usage () 
 {
@@ -67,12 +58,10 @@ for option in "$@"; do
     ;;
     -*)
     echo "$0: Unrecognized option '$option'" 1>&2
-    usage
     exit 1
     ;;
     *)
     echo "$0: Unrecognized parameter '$option'" 1>&2
-    usage
     exit 1
     ;;
     esac
@@ -93,7 +82,6 @@ debug() {
   log "debug: " "$@"
 }
 
-
 ### Final exit script
 ### All cleanup has been done - output the result based on
 ### the parameter (provided --check-only not used):
@@ -107,16 +95,16 @@ final_exit ()
     exit $1
 }
 
-### Unmount any (loop) devices used in script and remove mountpoints
+### Unmount and remove mountpoint used
 cleanup_for_exit ()
 {
 # all mount checks with grep add a space to differentiate e.g. /dev/sda1 from /dev/sda11
 # Not really necessary for these custom mountpoints but do it anyway.
 # Depending on when the exception is encountered there may be nothing to cleanup
-
+# other mountpoint - for checking multi-partition migrations
     if [ $(mount | grep "$other_mount"'\ ' | wc -l) -ne 0 ]; then
       umount $other_mount > /dev/null 2>&1
-      sleep 1
+      sleep 2
     fi
     if [ -d "$other_mount" ]; then
       rmdir "$other_mount" > /dev/null 2>&1 
@@ -133,6 +121,7 @@ exit_script ()
     cleanup_for_exit
     final_exit $1
 }
+
 
 # Check partition - user friendly checks to let users know if they've selected
 # a drive or an extended partition; then make sure it's type '83'
@@ -220,7 +209,7 @@ check_partition ()
 # check size of directory under current install ($root is either /
 # or the path that a root.disk is mounted under)
     debug "Checking target partition for /"$dir""
-    if mount -t auto "$2" $other_mount 2> /dev/null; then
+    if mount -t auto --read-only "$2" $other_mount 2> /dev/null; then
       if [ $(ls -1 $other_mount | wc -l) -ne 0 ] ; then
         if [ $(ls -1 $other_mount | wc -l) -gt 1 ] || \
            [ "$(ls $other_mount)" != "lost+found" ]; then
@@ -228,13 +217,12 @@ check_partition ()
         fi
       fi
       target_size=$(df $2 | tail -n 1 | awk '{print $2}')
-      debug "Size of target for /$dir ($2) is $targ_size"
+      debug "Size of target for /$dir ($2) is $target_size"
       sleep 1
       umount $other_mount
     else
         error "Partition $2 could not be mounted for validation."
         error "Make sure it is a valid ext2/3/4 partition and try again"
-        exit_script 1
     fi
 }
 
@@ -268,11 +256,15 @@ check_size ()
 debug "Parameters passed: "$@""
 if [ "$(whoami)" != root ]; then
   error "Admin rights are required to run this program."
-  exit 1
+  exit_script 1
 fi
 check_targets
 if [ "$edit_fail" == true ]; then
-  exit 1
+  exit_script 1
 fi
 check_size
-final_exit 0
+if [ "$edit_fail" == true ]; then
+  exit_script 1
+fi
+exit_script 0
+

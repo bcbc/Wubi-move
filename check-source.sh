@@ -52,12 +52,10 @@ for option in "$@"; do
     ;;
     -*)
     echo "$0: Unrecognized option '$option'" 1>&2
-    usage
     exit 1
     ;;
     *)
-    echo "$0: Unrecognized parameter" 1>&2
-    usage
+    echo "$0: Unrecognized parameter '$option'" 1>&2
     exit 1
     ;;
     esac

@@ -364,279 +364,6 @@ exit_script ()
     final_exit $1
 }
 
-# Check that a virtual disk is not mounted
-check_disk_mount ()
-{
-# this code goes through each line in /proc/mounts
-# and compares the first column ($DEV) to "/dev/loop*"
-# If it finds an existing loop mount it retrieves the
-# associated filename and compares it to the root.disk
-    while read DEV MTPT FSTYPE OPTS REST; do
-        case "$DEV" in
-          /dev/loop/*|/dev/loop[0-9])
-            loop_file=`losetup "$DEV" | sed -e "s/^[^(]*(\([^)]\+\)).*/\1/"`
-            if  [ "$loop_file" = "$1" ]; then
-                error ""$1" is mounted - please unmount and try again"
-                exit_script 1
-            fi
-          ;;
-        esac
-    done < /proc/mounts
-}
-
-# mount a virtual disk - exit if it fails
-mount_virtual_disk()
-{
-    if mount -o loop "$1" "$2" 2> /tmp/wubi-move-error; then
-        true #nothing yet
-    else
-        error ""$1" could not be mounted"
-# Check for 'file system ext4 unknown' message e.g. if you boot an
-# 8.04 disk and try to migrate a current ext4 root.disk 
-        if [ $(cat /tmp/wubi-move-error | grep "unknown filesystem type 'ext4'" | wc -l) -eq 1 ]; then 
-            error "The live environment you are using doesn't support"
-            error "the virtual disks ext4 file system. Try using an"
-            error "Ubuntu CD containing release 9.10 or later."
-        else
-            # some other issue - output message
-            error "Error is: $(cat /tmp/wubi-move-error)"
-            error "Check that the path/name is correct and"
-            error "contains a working Wubi install."
-        fi
-        exit_script 1
-    fi
-}
-
-check_fstab ()
-{
-# this code goes through each line in /etc/fstab
-# and makes sure the virtual disks are not mounted
-# and mountable. It assumes that /host/ubuntu/disks/xxx.disk
-# means that xxx.disk is in the same location as the current 
-# root.disk that whose /etc/fstab contains xxx.disk
-    while read fDEV fMTPT fTYPE fOPTS fDMP fPASS; do
-        case "$fMTPT" in 
-          /home|/usr)
-            disks_path=`echo $fDEV | sed -e "s/\(^\/host\/ubuntu\/disks\/\)\(.*\)/\1/"`
-            if [ "$disks_path" = "/host/ubuntu/disks/" ]; then          
-                virtual_disk=`echo $fDEV | sed -e "s/\(^\/host\/ubuntu\/disks\/\)\(.*\)/\2/"`
-                if [ ! -f "$rootdiskpath"$virtual_disk ]; then
-                   error "Root disk contains a reference to: "$virtual_disk""
-                   error "This cannot be found in: "$rootdiskpath""
-                   error "Please fix and retry"
-                   exit_script 1
-                fi
-                check_disk_mount "$rootdiskpath"$virtual_disk"\ "
-                mkdir "$root_mount"$fMTPT
-                mount_virtual_disk "$rootdiskpath"$virtual_disk "$root_mount"$fMTPT
-            fi    
-          ;;
-        esac
-    done < "$root_mount"/etc/fstab
-}
-
-
-
-# Attempt to migrate from a root.disk. The root.disk must be a fully
-# contained Ubuntu install with /, /boot, /home, /usr (note this excludes
-# grub-legacy Ubuntu since /boot is on the windows partition).
-# The checks performed here are pretty basic.
-# The onus is on the user to have a working Wubi root.disk
-root_disk_migration () 
-{
-    debug "Checking --root-disk option"
-    if [ ! -f "$root_disk" ]; then
-        error "root disk not found: "$root_disk""
-        exit_script 1
-    fi
-# Since the migration can be from a live CD
-    if [ "$no_bootloader" = "true" ]; then
-        error "You cannot use --no-bootloader with --root-disk"
-        exit_script 1
-    fi
-
-# mount the root.disk and check it is a fully contained install
-# or else the /etc/fstab links to additional virtual disks and 
-# these can be validated.
-# /usr, /home, and /boot are present. If this is a grub legacy
-# migration /boot is always separate so it's not possible to migrate 
-    mkdir -p $root_mount
-
-# make sure the root.disk is not already mounted
-    check_disk_mount "$root_disk""\ "
-
-# mount it - fail if the mount fails
-    mount_virtual_disk "$root_disk" "$root_mount"
-
-# override root for the copy command.
-    root="$root_mount"/
-
-# read the /etc/fstab and check for other virtual disks, make sure they are there, and unmounted.
-# Create mountpoints for /usr and /home if they exist and mount them
-    rootdiskpath=${root_disk%/*}/
-    check_fstab    
-    
-# determine size of install
-    awkscript="\$6==\""$root_mount"\" || \$6==\""$root_mount"/usr\" || \$6==\""$root_mount"/home\" {sum += \$3} END {print sum}"
-    install_size=$(df | awk "$awkscript")
-    awkscript="\$2==\""$root_mount"/home\ \" {total = \$1} END {print total}"
-
-# check we have all the required files - grub legacy won't work as
-# we never mount /boot separately
-    if [ $(ls -1 "$root_mount"/usr | wc -l) -eq 0 ] || \
-       [ $(ls -1 "$root_mount"/home | wc -l) -eq 0 ] || \
-       [ $(ls -1 "$root_mount"/boot | wc -l) -eq 0 ]; then
-        error "Root disk ("$root_disk") missing required directories."
-        error "If the original release was prior to 9.10 then it can"
-        error "not be migrated from the root.disk."
-        exit_script 1
-    fi
-
-# make sure the architecture matches
-    if [ $(file /bin/bash | grep '32-bit' | wc -l) -eq 1 ]; then
-      if [ $(file "$root_mount"/bin/bash | grep '64-bit' | wc -l) -eq 1 ]; then
-        error "Current Ubuntu architecture is 32-bit but root.disk contains a 64-bit install."
-        error "You need to migrate from a 64-bit environment"
-        exit_script 1
-      fi
-    elif [ $(file "$root_mount"/bin/bash | grep '32-bit' | wc -l) -eq 1 ]; then
-      error "Current Ubuntu architecture is 64-bit but root.disk contains a 32-bit install."
-      error "You need to migrate from a 32-bit environment"
-      exit_script 1
-    fi
-    debug "Validated --root-disk option"
-}
-
-### Determine whether this is a wubi install or not
-### Returns 0: Wubi, 1: Normal, 2: some other loop install (mint4win?)
-check_wubi ()
-{
-# first check for a root_disk - always wubi
-    if [ ! -z "$root_disk" ]; then
-        root_disk_migration
-        return 0 # wubi
-    fi
-
-# Ubuntu releases prior to 9.10 don't support ext4 (default)
-    if ! type mkfs.ext4 > /dev/null 2>&1 ; then
-        fs=ext3
-    fi
-# Identify root device - looking for /dev/loop , and then identify the loop file (root.disk)
-# Note for Grub legacy, the /boot device is the windows host. 
-# For releases without grub-probe the mount output directly refers to root.disk on Wubi
-    if ! type grub-probe > /dev/null 2>&1 ; then
-      if [ $(mount | grep ' / ' | grep '/host/ubuntu/disks/root.disk' | wc -l) -eq 1 ]; then
-        return 0 # e.g. wubi in release 8.04
-      elif [ $(mount | grep ' / ' | wc -l) -eq 1 ]; then
-        fs=ext3
-        return 1
-      else
-        error "Cannot migrate from a Live CD/USB"
-        error "unless you use option: --root-disk= "
-        exit_script 1
-      fi
-    fi
-
-# Check what device root (/) is mounted on
-    root_device="`grub-probe --target=device / 2> /dev/null`"
-    if [ -z "$root_device" ]; then
-        error "Cannot migrate from a Live CD/USB"
-        error "unless you use option: --root-disk= "
-        exit_script 1
-    fi
-
-# identify root.disk if a Wubi install
-    case ${root_device} in
-      /dev/loop/*|/dev/loop[0-9])
-        loop_file=`losetup ${root_device} | sed -e "s/^[^(]*(\([^)]\+\)).*/\1/"`
-      ;;
-    esac
-
-    # Check whether booted from loop device 
-    # Check whether ext3 - stick with that (not supporting ext2)
-    if [ "x${loop_file}" = x ] || [ ! -f "${loop_file}" ]; then
-        # not wubi - but before leaving, check whether the file system is ext3
-        if [ "$(blkid -c /dev/null -o value -s TYPE "$root_device")" = "ext3" ]; then
-            fs=ext3
-        fi
-        return 1 # not wubi
-    fi
-
-    # Irregular root.disk - don't allow (at this time) since it's possible
-    # to migrate using the --root-disk= option anyway.
-    if [ "$loop_file" != "/host/ubuntu/disks/root.disk" ]; then
-        return 2 # migrate not permitted
-    fi
-
-    # find the mountpoint for the root.disk - basically strip
-    # /host/ubuntu/disks/root.disk down from the right to the left
-    # until it is a mountpoint (/host/ubuntu/disks, /host/ubuntu, /host)
-    # We're expecting /host
-    mtpt="${loop_file%/*}"
-    while [ -n "$mtpt" ]; do
-        while read DEV MTPT FSTYPE OPTS REST; do
-            if [ "$MTPT" = "$mtpt" ]; then
-                loop_file=${loop_file#$MTPT}
-                host_mountpoint=$MTPT
-                break
-            fi
-        done < /proc/mounts
-        mtpt="${mtpt%/*}"
-        [ -z "$host_mountpoint" ] || break
-    done
-
-    #keep it to the known scenarios
-    if [ "$host_mountpoint" != "/host" ]; then
-        return 2 # irregular - avoid
-    fi
-}
-
-# Check partition - user friendly checks to let users know if they've selected
-# a drive or an extended partition; then make sure it's type '83'
-# Bypass check for GPT for now. (fdisk kicks out an error for GPT)
-# Parameters:
-#   $1 = partition
-#   $2 = type ( "83" or "82")
-check_partition_type ()
-{
-    partition_disk=${1%%[0-9]*}
-    if [ "$1" = "$partition_disk" ]; then
-        error "partition "$1" is a drive, not a partition."
-    elif [ $(fdisk -l "$partition_disk" 2> /dev/null | grep -i "GPT" | grep "[ \t]ee[ \t]" | wc -l) -ne 0 ]; then
-    # bypass GPT disks - doesn't apply
-        true
-    elif [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]5[ \t]" | grep -i "Extended" | wc -l) -eq 1 ]; then
-        error "partition "$1" is an Extended partition."
-    elif [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]f[ \t]" | grep -i "W95 Ext'd (LBA)" | wc -l) -eq 1 ]; then
-        error "partition "$1" is an Extended partition."
-    elif [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]85[ \t]" | grep -i "Linux extended" | wc -l) -eq 1 ]; then
-        error "partition "$1" is an Extended partition."
-    elif [ "$2" == "83" ]; then
-      if [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]"$2"[ \t]" | grep -i "Linux" | wc -l) -eq 0 ]; then
-        error "partition "$1" must be type "$2" - Linux."
-      fi
-    else
-      if [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]"$2"[ \t]" | grep -i "Linux swap" | wc -l) -eq 0 ]; then
-        error "partition "$1" must be type "$2" - Linux swap."
-      fi
-    fi
-}
-
-### other device prechecks
-precheck_other ()
-{
-    for i in "$homedev" "$bootdev" "$usrdev"; do
-      if [ -n "$i" ]; then
-        if [ $(mount | grep "$i"'\ ' | wc -l) -ne 0 ]; then
-          error ""$i" is mounted - please unmount and try again"
-        fi
-        if [ ! -b "$i" ]; then
-          error ""$i" is not a block device."
-        fi
-        check_partition_type $i "83"
-      fi
-    done
-}
 
 # check partition uuid is the same as saved uuid (for --resume)
 # parameters
@@ -657,6 +384,7 @@ resume_precheck ()
           error "A $2 partition cannot be added for a resumed migration"
           return 1
       fi
+
       return 0
 }
 
@@ -717,43 +445,23 @@ validate_resume_synch ()
     fi
 }
 
-### Early checks - must be admin, check target and swap device(s)
-### For resume option confirm the targets are the same
-### Also check for mounted partitions that aren't excluded by the script
-check_targets ()
+pre_checks ()
 {
-# target device must be a non-empty string and a block device
-# make sure the device is not mounted already
+  if [ "$(whoami)" != root ]; then
+    error "Admin rights are required to run this program."
+    exit 1  # exit immediately no cleanup required
+  fi
+}
+
+
+### Validate target device and swap device
+### Check size is sufficient
+### Check options against type of install
+### For resume option confirm the targets are the same
+sanity_checks ()
+{
     disk=${dev%%[0-9]*}
-    if [ -z "$dev" ] || [ ! -b "$dev" ]; then
-        error "target_partition ("$dev") must be a valid partition."
-    else
-# determine drive of target partition - make sure the user hasn't
-# specified the drive instead of the partition
-        check_partition_type "$dev" "83"
 
-        if [ $(mount | grep "$dev"'\ ' | wc -l) -ne 0 ]; then
-            error ""$dev" is mounted - please unmount and try again"
-        fi
-    fi
-
-# precheck separate target partitions for /boot /usr /home
-    precheck_other
-
-# if swap device present must be a block device
-    if [ -n "$swapdev" ]; then
-      if [ ! -b "$swapdev" ]; then
-        error "swapdevice ("$swapdev") is not a block device."
-      else
-# swap partition type is '82 - Linux swap / Solaris'
-# Blkid will report type "swap" or "swsuspend", the latter if
-# the swap partition contains a hibernated image.
-        check_partition_type "$swapdev" "82"
-        if [ "$(blkid -c /dev/null -o value -s TYPE "$swapdev")" = "swsuspend" ]; then
-          error ""$swapdev" contains a hibernated image"
-        fi
-      fi
-    fi
 # Option --shared-swap is when you want to share the swap partition that is 
 # already in use by another install. So you want to avoid running mkswap as
 # this will change the UUID (and you have to update the other install)
@@ -777,6 +485,29 @@ check_targets ()
       validate_resume_synch "--resume"
     fi
 
+    size_required=$install_size
+    if [ -n "$bootdev" ]; then
+      if [ $target_boot_size -lt `echo "$boot_size + $boot_space_buffer" | bc` ]; then
+        error "Target partition $bootdev for /boot is not big enough"
+      fi
+      size_required=`echo "$size_required - $boot_size" | bc`
+    fi
+    if [ -n "$homedev" ]; then
+      if [ $target_home_size -lt `echo "$home_size + $space_buffer" | bc` ]; then
+        error "Target partition $homedev for /home is not big enough"
+      fi
+      size_required=`echo "$size_required - $home_size" | bc`
+    fi
+    if [ -n "$usrdev" ]; then
+      if [ $target_usr_size -lt `echo "$usr_size + $space_buffer" | bc` ]; then
+        error "Target partition $usrdev for /usr is not big enough"
+      fi
+      size_required=`echo "$size_required - $usr_size" | bc`
+    fi
+    if [ $target_root_size -lt `echo "$size_required + $space_buffer" | bc` ]; then
+      error "Target partition $dev for / is not big enough"
+    fi
+
     if [ "$no_mkswap" = "true" ]; then
       if [ $(swapon -s | grep "$swapdev"'\ ' | wc -l) -eq 0 ]; then
         swapon $swapdev > /dev/null 2>&1
@@ -789,82 +520,7 @@ check_targets ()
       fi
     fi
 
-# check for partitions mounted on 'unexpected' mountpoints. These aren't
-# included in the space check and can cause the migration to run out of space
-# during the rsync copy. Mountpoints under /mnt or /media and of course
-# /boot, /usr, /home, /root, /tmp and /host are not a problem.
-# This check doesn't apply to a root.disk migration
-    mtpt=
-    if [ -z "$root_disk" ]; then
-      while read DEV MTPT FSTYPE OPTS REST; do
-        case "$DEV" in
-          /dev/sd[a-z][0-9])
-            mtpt=$MTPT
-            work=$MTPT
-            while true; do
-                work=${mtpt%/*}
-                if [ "$work" == "" ]; then
-                    break
-                fi
-                mtpt=$work
-            done
-            case $mtpt in
-            /mnt|/media|/host|/home|/usr|/boot|/tmp|/root)
-                true #ok
-                ;;
-            *)
-                error ""$DEV" is mounted on "$MTPT""
-                error "The migration script does not automatically"
-                error "exclude this mountpoint."
-                error "Please unmount "$MTPT" and try again."
-                ;;
-            esac
-          ;;
-        esac
-      done < /proc/mounts
-    fi
-}
-
-# Identify migration source and validate
-# Can be a wubi install, a standalone root.disk (and other virtual disks),
-# a normal ubuntu install - also check whether the install has grub-legacy
-# installed.
-check_migration_source ()
-{
-# Check whether we're migrating a Wubi install or normal install.
-# The Wubi install can either be running or a root.disk file
-    check_wubi
-    rc="$?"
-    wubi_install=true
-    if [ "$rc" -eq "0" ]; then
-      debug "Wubi-install migration"
-    elif [ "$rc" -eq "1" ]; then
-      wubi_install=false
-      debug "Normal (non-Wubi) install migration"
-    elif [ "$rc" -eq "2" ]; then
-      error "Unsupported Wubi install (irregular root.disk or mountpoint)"
-      exit_script 1
-    fi
-
-# create a temp directory to mount the target partition
-    mkdir -p $target
-
-# make sure the mountpoint is not in use
-    umount $target 2> /dev/null
-
-# If this isn't a root.disk install, check
-# which version of grub is installed.
-# Have to use grub-install.real on Wubi or else you
-# can get grub-probe and/or permission errors
-    if [ -z "$root_disk" ]; then
-      if [ -f "/usr/sbin/grub-install.real" ]; then
-        if [ $(grub-install.real --version | grep "0.97" | wc -l) -ne 0 ]; then
-            grub_legacy=true
-        fi
-      elif [ $(grub-install --version | grep "0.97" | wc -l) -ne 0 ]; then
-          grub_legacy=true
-      fi        
-      if [ "$grub_legacy" = "true" ]; then
+    if [ "$grub_type" != "Grub2" ]; then
         debug "Grub-legacy detected on migration source"
         info "Grub (legacy) is installed - this will be replaced"
         info "with Grub2 (only on the migrated install)."
@@ -885,195 +541,35 @@ check_migration_source ()
         else
           grub_common_exists=false
         fi
+    fi
+
+    if [ "$resume_prev" != "true" ]; then # skip check if --resume or --synch
+      if [ "$empty" == "false" ]; then
+        error "Target partitions are not empty."
       fi
     fi
-}
 
-pre_checks ()
-{
-  if [ "$(whoami)" != root ]; then
-    error "Admin rights are required to run this program."
-    exit 1  # exit immediately no cleanup required
-  fi
-#  case "$input" in 
-#        "y" | "Y" )
-#          return 0 ;;
-#        "n" | "N" )
-#          return 1 ;;
-#        * )
-#          warn "Invalid response ('$input')"
-#      esac
-#
-#if [ "$source_only" != "true" ]; then
-    check_targets
-#fi
-check_migration_source
-}
-
-
-# validate other target partitions
-# Parameters:
-#   $1 = "home" | "usr" | "boot"
-#   $2 = target partition for /$1
-sanitycheck_other ()
-{
-# create a temp directory to mount the target partition
-# make sure the mountpoint is not in use
-    mkdir -p $other_mount
-    umount $other_mount 2> /dev/null
-
-# attempt to mount, determine size of target partition
-# check size of directory under current install ($root is either /
-# or the path that a root.disk is mounted under)
-    info "Checking target partition for /"$1""
-     if mount -t auto "$2" $other_mount 2> /dev/null; then
-       if [ "$resume_prev" != "true" ]; then # skip check if --resume or --synch
-        if [ $(ls -1 $other_mount | wc -l) -ne 0 ] ; then
-          if [ $(ls -1 $other_mount | wc -l) -gt 1 ] || \
-             [ "$(ls $other_mount)" != "lost+found" ]; then
-            error "Partition $2 is not empty. Cancelling"
-            if [ "$debug" = "true" ]; then
-                test_YN "DEBUG mode: do you want to continue anyway?"
-                if [ $? -ne 0 ]; then
-                    exit_script 1
-                fi
-            else
-               exit_script 1
-            fi
-          fi
-        fi
+    # If user wants to resynch a previous migrated install (useful for maintaining
+    # a bootable backup on an external drive) a valid synch file must exist on target
+    # with exact matching partition UUID(s). 
+    # Resuming and synching are similar - no format of target partitions
+    if [ "$resynch_prev" = "true" ]; then
+      mkdir -p $target
+      sleep 5 # damn nautilus automount - if not disabled can prevent unmount
+      mount $dev $target
+      if [ -n "$homedev" ]; then
+        mkdir -p $target/home
+        mount $target/home $homedev
       fi
-      targ_size=$(df $2 | tail -n 1 | awk '{print $2}')
-      curr_size=$(du -s "$root"$1 2> /dev/null | cut -f 1)
-      debug "Current size of /$1 is $curr_size"
-      debug "Size of target for /$1 ($2) is $targ_size"
-      # just in case of an error, the size might be zero
-      if [ $curr_size = "" ] || [ $curr_size -eq 0 ]; then
-        error "Error determining size of /$1. Cancelling"
-        exit_script 1
+      resume_prev=true
+      validate_resume_synch "--synch"
+      if [ -n "$homedev" ]; then
+        sleep 5 # damn nautilus automount - if not disabled can prevent unmount
+        umount $target/home
       fi
-      if [ $targ_size = "" ] || [ $targ_size -eq 0 ]; then
-        error "Error determining size of $2. Cancelling"
-        exit_script 1
-      fi
-      if [ "$1" == "boot" ]; then
-        temp_size=`echo "$curr_size + $boot_space_buffer" | bc` 
-      else
-        temp_size=`echo "$curr_size + $space_buffer" | bc` 
-      fi
-      if [ $targ_size -lt $temp_size ]; then
-        error "Target partition for /$1 is not big enough"
-        error "The current install /$1 is $curr_size K"
-        error "The target partition "$2" is $targ_size K"
-        error "The minimum allowed is "$temp_size" K"
-        error "Cancelling"
-        exit_script 1 
-      fi
-      root_size=`echo "$root_size - $curr_size" | bc`
-      debug "Remaining size of / reduced to: $root_size"
-      sleep 2
-      umount $other_mount
-    else
-        error "Partition $2 could not be mounted for validation."
-        error "Make sure it is a valid ext2/3/4 partition and try again"
-        exit_script 1
+      sleep 5 # damn nautilus automount - if not disabled can prevent unmount
+      umount $target
     fi
-}
-
-### Validate target device and swap device
-### Check size is sufficient
-### Check options against type of install
-sanity_checks ()
-{
-# try and mount target partition, and ensure that it is empty
-# (note freshly formatted ext2/3/4 contain a single 'lost and found')
-    echo ""
-    if mount -t auto "$dev" $target 2> /dev/null; then
-
-        # If user wants to resynch a previous migrated install (useful for maintaining
-        # a bootable backup on an external drive) a valid synch file must exist on target
-        # with exact matching partition UUID(s). 
-        # Resuming and synching are similar - no format of target partitions
-        if [ "$resynch_prev" = "true" ]; then
-          resume_prev=true
-          validate_resume_synch "--synch"
-        fi
-
-# If --resume or --synch it's expected that the target partition(s) are not
-# empty - otherwise, they have to be empty.
-        if [ "$resume_prev" != "true" ]; then # skip check if --resume or --synch
-         if [ $(ls -1 $target | wc -l) -ne 0 ] ; then
-          if [ $(ls -1 $target | wc -l) -gt 1 ] || \
-             [ "$(ls $target)" != "lost+found" ]; then
-            error "Partition $dev is not empty. Cancelling"
-            if [ "$debug" = "true" ]; then
-                test_YN "DEBUG mode: do you want to continue anyway?"
-                if [ $? -ne 0 ]; then
-                    exit_script 1
-                fi
-            else
-               exit_script 1
-            fi
-          fi
-         fi
-        fi
-    else
-        error "Partition $dev could not be mounted for validation."
-        error "This can occur if the partition is unformatted or the file"
-        error "system is corrupted. "
-        exit_script 1
-    fi
-
-# Determine the install size to be migrated and the total size of the target
-# Install size sums the 3rd column (Used space) on the /, /home and /usr partitions
-# Total size takes the 2nd column on the target partition.
-# For root.disk migrations we already know the size and the release is 9.10 or greater
-# so just get the target size and don't bother checking for zero based index in awk
-    target_size=$(df $target|tail -n 1|awk '{print $2}')
-    if [ -z "$root_disk" ]; then
-        install_size=$(df | awk '$6=="/" || $6=="/home" || $6=="/usr"|| $6=="/boot" {sum += $3} END {print sum}')
-        if [ "$install_size" = "" ]; then # 8.04 - awk used zero based column index
-          debug "zero-based column index version of awk e.g. on release 8.04"
-          install_size=$(df | awk '$5=="/" || $5=="/home" || $5=="/usr" || $5=="/boot" {sum += $2} END {print sum}')
-          target_size=$(df $target|tail -n 1|awk '{print $1}')
-        fi
-    fi
-    debug "Target root partition size (in K):" $target_size
-    debug "Current total install size (in K):" $install_size
-
-# just in case of an error, the size might be zero
-    if [ $install_size = "" ] || [ $install_size -eq 0 ]; then
-        error "Error determining size of install. Cancelling"
-        exit_script 1
-    fi
-
-    # if migrating to multiple partitions, validate each target (other than root)
-    # and reduce the root_size for the main target size check
-    root_size=$install_size
-    if [ -n "$homedev" ]; then
-      sanitycheck_other home $homedev
-    fi
-    if [ -n "$usrdev" ]; then
-      sanitycheck_other usr $usrdev
-    fi
-    if [ -n "$bootdev" ]; then
-      sanitycheck_other boot $bootdev
-    fi
-    
-# Ensure the target partition is large enough 
-# There must be some free space ($space_buffer)
-    info "Checking target partition for / (root)"
-    temp_size=`echo "$root_size + $space_buffer" | bc` 
-    if [ $target_size -lt $temp_size ]; then
-        error "Target partition ($dev) is not big enough"
-        error "Size of data to migrate is $root_size K"
-        error "Total space on target is $target_size K"
-        error "There must be at least $space_buffer K free space"
-        error "Cancelling"
-        exit_script 1
-    fi
-    debug "Size of data to migrate to / is "$root_size""
-    umount $target
 }
 
 ### get all user interaction out of the way so that the 
@@ -1112,7 +608,7 @@ final_questions ()
     else
       if [ "$no_bootloader" = "true" ]; then
       # grub-legacy bit
-        if [ "$grub_legacy" = "true" ]; then
+        if [ "$grub_type" != "Grub2" ]; then
           info "You have selected --no-bootloader with grub-legacy"
           info "You will have to manually modify your current grub"
           info "menu.lst to boot the migrated install."
@@ -1250,6 +746,11 @@ create_resumefile ()
 # Disable 10_lupin script
 migrate_files ()
 {
+# create a temp directory to mount the target partition
+# make sure the mountpoint is not in use
+    mkdir -p $target
+    umount $target 2> /dev/null
+
     create_resumefile
     mount $dev $target # should't fail ever - freshly formatted
     if [ "$?" != 0 ]; then
@@ -1522,16 +1023,97 @@ update_grub ()
     fi
 }
 
+check_source ()
+{
+    parm=
+    if [ "$debug" == "true" ]; then
+        parm="$parm"" --debug"
+    fi
+    if [ -z "$root_disk" ]; then
+       result="`. check-source.sh ${parm}`"
+    else
+       result="`. check-source.sh ${parm} --root="${root_disk}"`"
+    fi
+    if [ $? -ne 0 ]; then
+        exit 1
+    fi
+    set $result
+    install_type=$1
+    grub_type=$2
+    host_or_root=$3
+    install_size=$4
+    home_size=$5
+    usr_size=$6
+    boot_size=$7
+
+    info "Source for migration validated successfully:"
+    info "  Install type: $install_type"
+    if [ "$install_type" == "Wubi" ]; then
+      wubi_install=true
+      info "  Host partition: $host_or_root"
+    else
+      info "  Root partition: $host_or_root"
+    fi
+    info "  Size of install: $install_size K"
+    info "  Size of /boot: $boot_size K"
+    info "  Size of /usr: $usr_size K"
+    info "  Size of /home: $home_size K"
+}
+
+check_target ()
+{
+    script="--root="${dev}""
+    if [ "$debug" == "true" ]; then
+        script="$script"" --debug"
+    fi
+    if [ -n "$swapdev" ]; then
+        script="$script"" --swap="${swapdev}""
+    fi
+    if [ -n "$bootdev" ]; then
+        script="$script"" --boot="${bootdev}""
+    fi
+    if [ -n "$usrdev" ]; then
+        script="$script"" --usr="${usrdev}""
+    fi
+    if [ -n "$homedev" ]; then
+        script="$script"" --home="${homedev}""
+    fi
+    result="`. check-target.sh ${script}`"
+    if [ $? -ne 0 ]; then
+        exit 1
+    fi
+    set $result
+    target_root_size=$1
+    target_home_size=$2
+    target_usr_size=$3
+    target_boot_size=$4
+    empty=$5
+    info "Target(s) for migration validated successfully:"
+    info "  Size of / partition: $target_root_size K"
+    if [ -n "$bootdev" ]; then
+      info "  Size of /boot partition: $target_boot_size"
+    fi
+    if [ -n "$usrdev" ]; then
+      info "  Size of /usr partition: $target_usr_size"
+    fi
+    if [ -n "$homedev" ]; then
+      info "  Size of /home partition: $target_home_size"
+    fi
+}
+
 #######################
 ### Main processing ###
 #######################
 debug "Parameters passed: "$@""
 pre_checks
-if  [ "$edit_fail" == "true" ]; then
-    exit_script 1
-fi
+check_source
+check_target
 sanity_checks
+if [ "$edit_fail" == "true" ]; then
+  exit_script 1
+fi
 final_questions
+exit_script 0
 format_partition
 migrate_files
 create_swap
