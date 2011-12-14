@@ -5,6 +5,7 @@
 # Options 
 root_disk=                  # path and name of root.disk file 
 debug=false                 # Output debug information
+keep_mounted=false          # Keep root.disk (and other .disks mounted on exit)
 rootdiskpath=               # path to root.disk file
 edit_fail=false             # set to true if edit checks failed
 
@@ -45,6 +46,10 @@ for option in "$@"; do
     exit 0 ;;
     --root-disk=*)
     root_disk=`echo "$option" | sed 's/--root-disk=//'` ;;
+# if the caller wants to keep the root.disk mounted, it must supply the mountpoint
+    --root-mount=*)
+    keep_mounted=true
+    root_mount=`echo "$option" | sed 's/--root-mount=//'` ;;
 ### undocumented debug option
     -d | --debug)
     set -x
@@ -98,7 +103,9 @@ cleanup_for_exit ()
 
 # If the migration is from a named root.disk, unmount if required,
 # and then delete mountpoint. Also check home.disk and usr.disk
+# If requested to keep mounted leave it (unless there are edit errors)
     if [ ! -z "$root_disk" ]; then
+     if [ "$edit_fail" == "true" ] || [ "$keep_mounted" == "false" ]; then
       if [ $(mount | grep "$root_mount"/home'\ ' | wc -l) -ne 0 ]; then
         umount "$root_mount"/home > /dev/null 2>&1
         sleep 3 
@@ -112,6 +119,7 @@ cleanup_for_exit ()
         sleep 3 
       fi
       [ -d "$root_mount" ] && rmdir "$root_mount" > /dev/null 2>&1
+     fi
     fi
 }
 
@@ -189,7 +197,7 @@ check_fstab ()
                    exit_script 1
                 fi
                 check_disk_mount "$rootdiskpath"$virtual_disk"\ "
-                mkdir "$root_mount"$fMTPT
+                mkdir -p "$root_mount"$fMTPT
                 mount_virtual_disk "$rootdiskpath"$virtual_disk "$root_mount"$fMTPT
             fi    
           ;;
@@ -223,6 +231,10 @@ root_disk_migration ()
 # /usr, /home, and /boot are present. If this is a grub legacy
 # migration /boot is always separate so it's not possible to migrate 
     mkdir -p $root_mount
+    if [ $? -ne 0 ]; then
+      error "Failed to create directory "$root_mount""
+      exit_script 1
+    fi
 
 # make sure the root.disk is not already mounted
     check_disk_mount "$root_disk""\ "
@@ -287,6 +299,8 @@ check_wubi ()
         return 0 # e.g. wubi in release 8.04
       elif [ $(mount | grep ' / ' | wc -l) -eq 1 ]; then
         return 1
+
+
       else
         error "Cannot migrate from a Live CD/USB"
         error "unless you use option: --root-disk= "
@@ -438,7 +452,9 @@ check_size ()
 # /boot, /usr, /home, /root, /tmp and /host are not a problem.
 # This check doesn't apply to a root.disk migration
     mtpt=
-    if [ -z "$root_disk" ]; then
+    if [ ! -z "$root_disk" ]; then
+      host_or_root="Rootdisk"
+    else
       while read DEV MTPT FSTYPE OPTS REST; do
         case "$DEV" in
           /dev/sd[a-z][0-9])
@@ -486,4 +502,4 @@ if [ "$(whoami)" != root ]; then
 fi
 check_migration_source
 check_size
-final_exit 0
+exit_script 0

@@ -6,10 +6,6 @@
 # If you have grub legacy installed, it will remove it on the 
 # target (only) and replace it with grub2.
 #
-# While every effort has been made to ensure the script works as
-# intended and is bug free, please note you use it AT YOUR OWN RISK.
-# Please BACKUP any important data prior to running.
-#
 # Credits:
 # Much of the script's fundamentals are based on the work of
 # other people e.g. the original wubi migration script and lupin:
@@ -53,7 +49,6 @@ source_only=false           # just check what the migration source (current inst
 version=2.2                 # Script version
 target=/tmp/wubi-move/target        # target device mountpoint
 root_mount=/tmp/wubi-move/rootdisk  # root.disk source mountpoint
-other_mount=/tmp/wubi-move/other    # used to check other target partitions
 space_buffer=400000         # minimum Kilobytes free space required on target partition(s)
 boot_space_buffer=100000    # minimum additional free space required for separate boot partition
 
@@ -74,7 +69,6 @@ root_device=                # Device that root (/) is mounted on
 loop_file=                  # Root.disk for running Wubi install
 loop_device=                # Loop device for mounted root.disk
 mtpt=                       # Mount point determination working variable
-awkscript=                  # Contains AWK script
 target_size=                # size of target partition
 install_size=               # size of current install
 
@@ -519,6 +513,7 @@ sanity_checks ()
         fi
       fi
     fi
+    info "Target partition size is sufficient"
 
     if [ "$grub_type" != "Grub2" ]; then
         debug "Grub-legacy detected on migration source"
@@ -543,12 +538,6 @@ sanity_checks ()
         fi
     fi
 
-    if [ "$resume_prev" != "true" ]; then # skip check if --resume or --synch
-      if [ "$empty" == "false" ]; then
-        error "Target partitions are not empty."
-      fi
-    fi
-
     # If user wants to resynch a previous migrated install (useful for maintaining
     # a bootable backup on an external drive) a valid synch file must exist on target
     # with exact matching partition UUID(s). 
@@ -569,6 +558,12 @@ sanity_checks ()
       fi
       sleep 5 # damn nautilus automount - if not disabled can prevent unmount
       umount $target
+    fi
+
+    if [ "$resume_prev" != "true" ]; then # skip check if --resume or --synch
+      if [ "$empty" == "false" ]; then
+        error "Migration not permitted because target partition(s) are not empty."
+      fi
     fi
 }
 
@@ -591,7 +586,7 @@ final_questions ()
     if [ "$assume_yes" = "true" ] ; then
       return 0
     fi
-    echo ""
+
     if [ "$resume_prev" = "true" ]; then
       if [ "$resynch_prev" = "true" ]; then
         info "The previous migration to "$dev""
@@ -621,6 +616,8 @@ final_questions ()
             info "uninstalling your Wubi install."
           fi
         fi
+      else
+          info "Grub2 will be installed to "$disk""
       fi
       info "Please close all open files before continuing."
       info "About to format the target partition ($dev)."
@@ -1025,14 +1022,15 @@ update_grub ()
 
 check_source ()
 {
-    parm=
+    info "Validating migration source..."
     if [ "$debug" == "true" ]; then
         parm="$parm"" --debug"
     fi
     if [ -z "$root_disk" ]; then
        result="`. check-source.sh ${parm}`"
     else
-       result="`. check-source.sh ${parm} --root="${root_disk}"`"
+       result="`. check-source.sh ${parm} --root-disk="${root_disk}" --root-mount="${root_mount}"`"
+       root="$root_mount"/
     fi
     if [ $? -ne 0 ]; then
         exit 1
@@ -1113,7 +1111,6 @@ if [ "$edit_fail" == "true" ]; then
   exit_script 1
 fi
 final_questions
-exit_script 0
 format_partition
 migrate_files
 create_swap
