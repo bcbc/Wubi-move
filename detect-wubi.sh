@@ -18,27 +18,6 @@ Look for Wubi install by locating the root.disk. This should be run
 from a live environment (or normal Ubuntu install), not a Wubi install.
 EOF
 } 
-### Check the options and parameters
-for option in "$@"; do
-    case "$option" in
-    -h | --help)
-    usage
-    exit 0 ;;
-### undocumented debug option
-    -d | --debug)
-    set -x
-    debug=true
-    ;;
-    -*)
-    echo "$0: Unrecognized option '$option'" 1>&2
-    exit 1
-    ;;
-    *)
-    echo "$0: Unrecognized parameter '$option'" 1>&2
-    exit 1
-    ;;
-    esac
-done
 
 # thanks os-prober
 log() {
@@ -56,6 +35,29 @@ error() {
 debug() {
   log "debug: " "$@"
 }
+
+
+### Check the options and parameters
+for option in "$@"; do
+    case "$option" in
+    -h | --help)
+    usage
+    exit 0 ;;
+### undocumented debug option
+    -d | --debug)
+    set -x
+    debug=true
+    ;;
+    -*)
+    error "$0: Unrecognized option '$option'"
+    exit 1
+    ;;
+    *)
+    error "$0: Unrecognized parameter '$option'"
+    exit 1
+    ;;
+    esac
+done
 
 
 # List ext2/34 partitions
