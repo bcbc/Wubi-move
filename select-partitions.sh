@@ -31,6 +31,7 @@ for option in "$@"; do
         target="linux"
     else
         error "Only one of --linux / --windows / --swap permitted"
+        exit 1
     fi
     ;;
     --windows)
@@ -38,6 +39,7 @@ for option in "$@"; do
         target="windows"
     else
         error "Only one of --linux / --windows / --swap permitted"
+        exit 1
     fi
     ;;
     --swap)
@@ -45,6 +47,7 @@ for option in "$@"; do
         target="swap"
     else
         error "Only one of --linux / --windows / --swap permitted"
+        exit 1
     fi
     ;;
 ### undocumented debug option
@@ -82,7 +85,7 @@ debug() {
 # List ext2/34 partitions
 select_linux ()
 {
-   partition_list=`blkid | grep -i 'TYPE="ext[234]"' | cut -d ' ' -f 1 | grep -v '/dev/loop' | sed "s/://g"`
+   partition_list=`blkid | grep -i 'TYPE="ext[234]"' | cut -d ' ' -f 1 | grep -i '^/dev/' | grep -v '/dev/loop' | sed "s/://g"`
 }
 # List ntfs/fat32 partitions
 select_windows ()
