@@ -758,7 +758,7 @@ migrate_files ()
     mount_other
     echo ""
     info "Copying files - please be patient - this takes some time"
-    rsync -a --delete --exclude="$root"host --exclude="$root"mnt/* --exclude="$root"home/*/.gvfs --exclude="$root"var/lib/lightdm/.gvfs --exclude="$root"media/*/* --exclude="$root"tmp/* --exclude="$root"proc/* --exclude="$root"sys/* $root $target # let errors show
+    rsync -a --delete --exclude="$root"host --exclude="$root"mnt/* --exclude="$root"home/*/.gvfs --exclude="$root"home/*/.cache/gvfs --exclude="$root"var/lib/lightdm/.gvfs --exclude="$root"media/*/* --exclude="$root"tmp/* --exclude="$root"proc/* --exclude="$root"sys/* $root $target # let errors show
     if [ "$?" -ne 0 ]; then
         echo ""
         error "Copying files failed. If the failure is due"
