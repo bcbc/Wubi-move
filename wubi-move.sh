@@ -736,6 +736,30 @@ create_resumefile ()
       echo "$tRoot $tSwap $tBoot $tUsr $tHome" > "$HOME"/.wubi-move
 }
 
+# Copy files as if the /, /boot, /home and /usr are separate file systems
+# allowing the use of --one-file-system option to exclude e.g. .gvfs
+# This works whether they are separate or not and gives a little more
+# feedback to the User that progress is being made (as this takes a bit
+# of time generally)
+copy_files()
+{
+    if [ "$1" == "root" ]; then
+        rsync -a --delete --one-file-system --exclude="$root"boot --exclude="$root"usr --exclude="$root"home --exclude="$root"tmp/* --exclude="$root"proc/* --exclude="$root"sys/* "$root" "$target" # let errors show
+    else
+        mkdir -p "$target"/"$1"
+        rsync -a --delete --one-file-system --exclude="$root"home/*/.cache/gvfs "$root""$1" "$target" # let errors show
+    fi
+    if [ "$?" -ne 0 ]; then
+        echo ""
+        error "Copying files failed. If the failure is due"
+        error "to file corruption, correct the problem and"
+        error "rerun with the --resume option."
+        error "Unmounting target..."
+        sleep 3
+        exit_script 1
+    fi
+}
+
 # Copy entire install to target partition
 # Monitor return code from rsync in case user hits CTRL-C.
 ## Make fake /host directory to allow override of /host mount 
@@ -757,17 +781,16 @@ migrate_files ()
     fi
     mount_other
     echo ""
-    info "Copying files - please be patient - this takes some time"
-    rsync -a --delete --exclude="$root"host --exclude="$root"mnt/* --exclude="$root"home/*/.gvfs --exclude="$root"home/*/.cache/gvfs --exclude="$root"var/lib/lightdm/.gvfs --exclude="$root"media/*/* --exclude="$root"tmp/* --exclude="$root"proc/* --exclude="$root"sys/* $root $target # let errors show
-    if [ "$?" -ne 0 ]; then
-        echo ""
-        error "Copying files failed. If the failure is due"
-        error "to file corruption, correct the problem and"
-        error "rerun with the --resume option."
-        error "Unmounting target..."
-        sleep 3
-        exit_script 1
-    fi
+    info "Copying files on - please be patient - this takes some time"
+    info "Copying from root (/)"
+    copy_files root
+    info "Copying from /usr"
+    copy_files usr
+    info "Copying from /boot"
+    copy_files boot
+    info "Copying from /home"
+    copy_files home
+    info "Copying completed"
     # When migrating from a live CD, the .wubi-move hasn't been copied
     # For a normal migration it's already copied. This supports the --synch option
     cp -n "$HOME"/.wubi-move "$target""$HOME"/.wubi-move
