@@ -749,7 +749,12 @@ copy_files()
         mkdir -p "$target"/"$1"
         rsync -a --delete --one-file-system --exclude="$root"home/*/.cache/gvfs "$root""$1" "$target" # let errors show
     fi
-    if [ "$?" -ne 0 ]; then
+    rc="$?"
+    if [ "$rc" -eq 24 ]; then
+        warn "Ignoring return code 24 from rsync copy..."
+        rc=0
+    fi
+    if [ "$rc" -ne 0 ]; then
         echo ""
         error "Copying files failed. If the failure is due"
         error "to file corruption, correct the problem and"
