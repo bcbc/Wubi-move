@@ -71,6 +71,7 @@ loop_device=                # Loop device for mounted root.disk
 mtpt=                       # Mount point determination working variable
 target_size=                # size of target partition
 install_size=               # size of current install
+local_dir=                  # directory containing this script
 
 usage () 
 {
@@ -444,6 +445,15 @@ pre_checks ()
   if [ "$(whoami)" != root ]; then
     error "Admin rights are required to run this program."
     exit 1  # exit immediately no cleanup required
+  fi
+  local_dir="$(dirname "$(readlink /proc/$$/fd/255)")"
+  if [ ! -f "$local_dir"/check-source.sh ]; then
+    error "Script "$local_dir"/check-source.sh is missing"
+    exit 1
+  fi
+  if [ ! -f "$local_dir"/check-target.sh ]; then
+    error "Script "$local_dir"/check-target.sh is missing"
+    exit 1
   fi
 }
 
@@ -1055,9 +1065,9 @@ check_source ()
         parm="$parm"" --debug"
     fi
     if [ -z "$root_disk" ]; then
-       result="`. check-source.sh ${parm}`"
+       result="`bash ${local_dir}/check-source.sh ${parm}`"
     else
-       result="`. check-source.sh ${parm} --root-disk="${root_disk}" --root-mount="${root_mount}"`"
+       result="`bash ${local_dir}/check-source.sh ${parm} --root-disk="${root_disk}" --root-mount="${root_mount}"`"
        root="$root_mount"/
     fi
     if [ $? -ne 0 ]; then
@@ -1104,7 +1114,7 @@ check_target ()
     if [ -n "$homedev" ]; then
         script="$script"" --home="${homedev}""
     fi
-    result="`. check-target.sh ${script}`"
+    result="`bash ${local_dir}/check-target.sh ${script}`"
     if [ $? -ne 0 ]; then
         exit 1
     fi
