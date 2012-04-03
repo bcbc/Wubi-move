@@ -17,12 +17,13 @@ boot_size=                  # size of target partition
 home_size=                  # size of target partition
 usr_size=                   # size of target partition
 target_size=                # working variable
+self="`basename $0`"
 
 usage () 
 {
     cat <<EOF
-Usage: sudo bash $0 [OPTION] target_partition [swap_partition]
-       e.g. sudo bash $0 /dev/sda5 /dev/sda6
+Usage: sudo bash $self [OPTION] target_partition [swap_partition]
+       e.g. sudo bash $self /dev/sda5 /dev/sda6
 
 Check the target partitiion
 Migrate an ubuntu install (wubi or normal) to partition
@@ -57,11 +58,11 @@ for option in "$@"; do
     debug=true
     ;;
     -*)
-    echo "$0: Unrecognized option '$option'" 1>&2
+    echo "$self: Unrecognized option '$option'" 1>&2
     exit 1
     ;;
     *)
-    echo "$0: Unrecognized parameter '$option'" 1>&2
+    echo "$self: Unrecognized parameter '$option'" 1>&2
     exit 1
     ;;
     esac
@@ -69,12 +70,12 @@ done
 
 # thanks os-prober
 log() {
-  logger -t "$0" -- "$@"
+  logger -t "$self" -- "$@"
 }
 
 error() {
   log "error: " "$@"
-  echo "$0: " "$@" 1>&2
+  echo "$self: " "$@" 1>&2
   edit_fail=true
 }
 
@@ -166,7 +167,7 @@ check_targets ()
           error ""$i" is mounted - please unmount and try again"
         fi
         if [ ! -b "$i" ]; then
-          error ""$i" is not a block device."
+          error ""$i" is not a valid partition."
         fi
         check_partition_type $i "83"
       fi
@@ -175,7 +176,7 @@ check_targets ()
 # if swap device present must be a block device
     if [ -n "$swapdev" ]; then
       if [ ! -b "$swapdev" ]; then
-        error "swapdevice ("$swapdev") is not a block device."
+        error "swapdevice ("$swapdev") is not a valid partition."
       else
 # swap partition type is '82 - Linux swap / Solaris'
 # Blkid will report type "swap" or "swsuspend", the latter if

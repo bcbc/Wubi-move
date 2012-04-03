@@ -27,13 +27,14 @@ mtpt=                       # Mount point determination working variable
 awkscript=                  # Contains AWK script
 target_size=                # size of target partition
 install_size=               # size of current install
+self="`basename $0`"
 
 usage () 
 {
     cat <<EOF
-Usage: sudo bash $0 [option]
-       e.g. sudo bash $0
-            sudo bash $0 --root-disk=<path to root disk>
+Usage: sudo bash $self [option]
+       e.g. sudo bash $self
+            sudo bash $self --root-disk=<path to root disk>
 
 Check the current install or the loop install based on the named root.disk
 EOF
@@ -56,11 +57,11 @@ for option in "$@"; do
     debug=true
     ;;
     -*)
-    echo "$0: Unrecognized option '$option'" 1>&2
+    echo "$self: Unrecognized option '$option'" 1>&2
     exit 1
     ;;
     *)
-    echo "$0: Unrecognized parameter '$option'" 1>&2
+    echo "$self: Unrecognized parameter '$option'" 1>&2
     exit 1
     ;;
     esac
@@ -68,12 +69,12 @@ done
 
 # thanks os-prober
 log() {
-  logger -t "$0" -- "$@"
+  logger -t "$self" -- "$@"
 }
 
 error() {
   log "error: " "$@"
-  echo "$0: " "$@" 1>&2
+  echo "$self: " "$@" 1>&2
   edit_fail=true
 }
 

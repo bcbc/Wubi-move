@@ -72,12 +72,15 @@ mtpt=                       # Mount point determination working variable
 target_size=                # size of target partition
 install_size=               # size of current install
 local_dir=                  # directory containing this script
+check_source_script=
+check_target_script=
+self="`basename $0`"
 
 usage () 
 {
     cat <<EOF
-Usage: sudo bash $0 [OPTION] target_partition [swap_partition]
-       e.g. sudo bash $0 /dev/sda5 /dev/sda6
+Usage: sudo bash $self [OPTION] target_partition [swap_partition]
+       e.g. sudo bash $self /dev/sda5 /dev/sda6
 
 Migrate an ubuntu install (wubi or normal) to partition
   -h, --help              print this message and exit
@@ -150,7 +153,7 @@ for option in "$@"; do
     usage
     exit 0 ;;
     -v | --version)
-    echo "$0: Version $version"
+    echo "$self: Version $version"
     exit 0 ;;
     --notes)
     assumptions_notes
@@ -190,7 +193,7 @@ for option in "$@"; do
     debug=true
     ;;
     -*)
-    echo "$0: Unrecognized option '$option'" 1>&2
+    echo "$self: Unrecognized option '$option'" 1>&2
     usage
     exit 1
     ;;
@@ -201,7 +204,7 @@ for option in "$@"; do
 ### Any additional parameters are errors
     if test "x$dev" != x; then
       if  test "x$swapdev" != x; then
-          echo "$0: Too many parameters" 1>&2
+          echo "$self: Too many parameters" 1>&2
           usage
           exit 1
       else
@@ -216,23 +219,23 @@ done
 
 # thanks os-prober
 log() {
-  logger -t "$0" -- "$@"
+  logger -t "$self" -- "$@"
 }
 
 error() {
   log "error: " "$@"
-  echo "$0: " "$@" 1>&2
+  echo "$self: " "$@" 1>&2
   edit_fail=true
 }
 
 info() {
   log "info: " "$@"
-  echo "$0: " "$@"
+  echo "$self: " "$@"
 }
 
 warn() {
   log "warning: " "$@"
-  echo "$0: " "$@"
+  echo "$self: " "$@"
 }
 
 debug() {
@@ -241,7 +244,7 @@ debug() {
 
 result () {
   log "result: " "$@"
-  echo "$0: " "$@"
+  echo "$self: " "$@"
 }
 
 
@@ -446,13 +449,16 @@ pre_checks ()
     error "Admin rights are required to run this program."
     exit 1  # exit immediately no cleanup required
   fi
+  #TODO check for spaces in path
   local_dir="$(dirname "$(readlink /proc/$$/fd/255)")"
-  if [ ! -f "$local_dir"/check-source.sh ]; then
-    error "Script "$local_dir"/check-source.sh is missing"
+  check_source_script="$local_dir"/check-source.sh
+  if [ ! -f "$check_source_script" ]; then
+    error "Script "$check_source_script" is missing"
     exit 1
   fi
-  if [ ! -f "$local_dir"/check-target.sh ]; then
-    error "Script "$local_dir"/check-target.sh is missing"
+  check_target_script="$local_dir"/check-target.sh
+  if [ ! -f "$check_target_script" ]; then
+    error "Script "$check_target_script" is missing"
     exit 1
   fi
 }
@@ -1065,12 +1071,14 @@ check_source ()
         parm="$parm"" --debug"
     fi
     if [ -z "$root_disk" ]; then
-       result="`bash ${local_dir}/check-source.sh ${parm}`"
+       result="`. "$check_source_script" ${parm}`"
     else
-       result="`bash ${local_dir}/check-source.sh ${parm} --root-disk="${root_disk}" --root-mount="${root_mount}"`"
+#TODO confirm --root-disk= handles paths with spaces
+       result="`. "$check_source_script" ${parm} --root-disk="${root_disk}" --root-mount="${root_mount}"`"
        root="$root_mount"/
     fi
     if [ $? -ne 0 ]; then
+        info "Validation of migration source failed"
         exit 1
     fi
     set $result
@@ -1083,10 +1091,10 @@ check_source ()
     boot_size=$7
 
     info "Source for migration validated successfully:"
-    info "  Install type: $install_type"
+#    info "  Install type: $install_type"
     if [ "$install_type" == "Wubi" ]; then
       wubi_install=true
-      info "  Host partition: $host_or_root"
+      info "  Wubi host partition: $host_or_root"
     else
       info "  Root partition: $host_or_root"
     fi
@@ -1098,6 +1106,7 @@ check_source ()
 
 check_target ()
 {
+    info "Validating migration target(s)..."
     script="--root="${dev}""
     if [ "$debug" == "true" ]; then
         script="$script"" --debug"
@@ -1114,8 +1123,9 @@ check_target ()
     if [ -n "$homedev" ]; then
         script="$script"" --home="${homedev}""
     fi
-    result="`bash ${local_dir}/check-target.sh ${script}`"
+    result="`. "$check_target_script" ${script}`"
     if [ $? -ne 0 ]; then
+        info "Validation of target(s) failed"
         exit 1
     fi
     set $result
@@ -1135,6 +1145,10 @@ check_target ()
     if [ -n "$homedev" ]; then
       info "  Size of /home partition: $target_home_size"
     fi
+#TODO message for swapdev OK
+#    if [ -n "$swapdev" ]; then
+#      info "  Swap partition: $target_boot_size"
+#    fi
 }
 
 #######################
