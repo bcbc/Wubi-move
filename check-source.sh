@@ -446,51 +446,6 @@ check_size ()
     boot_size=$curr_size
     
     debug "Size of data to migrate to / is "$root_size""
-
-# check for partitions mounted on 'unexpected' mountpoints. These aren't
-# included in the space check and can cause the migration to run out of space
-# during the rsync copy. Mountpoints under /mnt or /media and of course
-# /boot, /usr, /home, /root, /tmp and /host are not a problem.
-# This check doesn't apply to a root.disk migration
-    mtpt=
-    if [ ! -z "$root_disk" ]; then
-      host_or_root="Rootdisk"
-    else
-      while read DEV MTPT FSTYPE OPTS REST; do
-        case "$DEV" in
-          /dev/sd[a-z][0-9])
-            mtpt=$MTPT
-            work=$MTPT
-            while true; do
-                work=${mtpt%/*}
-                if [ "$work" == "" ]; then
-                    break
-                fi
-                mtpt=$work
-            done
-            case $mtpt in
-            /)
-                debug "Normal install root (/) mounted on "$DEV""
-                host_or_root="$DEV"
-                ;;
-            /host)
-                debug "Wubi host partition is "$DEV""
-                host_or_root="$DEV"
-                ;;
-            /mnt|/media|/home|/usr|/boot|/tmp|/root)
-                true #ok
-                ;;
-            *)
-                error ""$DEV" is mounted on "$MTPT""
-                error "The migration script does not automatically"
-                error "exclude this mountpoint."
-                error "Please unmount "$MTPT" and try again."
-                ;;
-            esac
-          ;;
-        esac
-      done < /proc/mounts
-    fi
 }
 
 #######################

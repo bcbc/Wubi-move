@@ -753,17 +753,17 @@ create_resumefile ()
 }
 
 # Copy files as if the /, /boot, /home and /usr are separate file systems
-# allowing the use of --one-file-system option to exclude e.g. .gvfs
+# allowing the use of --one-file-system option to exclude mounted partitions
 # This works whether they are separate or not and gives a little more
 # feedback to the User that progress is being made (as this takes a bit
 # of time generally)
 copy_files()
 {
     if [ "$1" == "root" ]; then
-        rsync -a --delete --one-file-system --exclude="$root"boot --exclude="$root"usr --exclude="$root"home --exclude="$root"tmp/* --exclude="$root"proc/* --exclude="$root"sys/* "$root" "$target" # let errors show
+        rsync -a --delete --one-file-system --exclude="$root"boot --exclude="$root"usr --exclude="$root"home --exclude="$root"tmp/* --exclude="$root"proc/* --exclude="$root"sys/* --exclude="$root"var/lib/lightdm/.gvfs "$root" "$target" # let errors show
     else
         mkdir -p "$target"/"$1"
-        rsync -a --delete --one-file-system --exclude="$root"home/*/.cache/gvfs "$root""$1" "$target" # let errors show
+        rsync -a --delete --one-file-system --exclude="$root"home/*/.gvfs --exclude="$root"home/*/.cache/gvfs "$root""$1" "$target" # let errors show
     fi
     rc="$?"
     if [ "$rc" -eq 24 ]; then
