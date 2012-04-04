@@ -446,6 +446,42 @@ check_size ()
     boot_size=$curr_size
     
     debug "Size of data to migrate to / is "$root_size""
+
+# Determine host partition (or root partition if not a wubi install)
+# For a root disk migration, just set it to 'Rootdisk'
+    mtpt=
+    if [ ! -z "$root_disk" ]; then
+      host_or_root="Rootdisk"
+    else
+      while read DEV MTPT FSTYPE OPTS REST; do
+        case "$DEV" in
+          /dev/sd[a-z][0-9])
+            mtpt=$MTPT
+            work=$MTPT
+            while true; do
+                work=${mtpt%/*}
+                if [ "$work" == "" ]; then
+                    break
+                fi
+                mtpt=$work
+            done
+            case $mtpt in
+            /)
+                debug "Normal install root (/) mounted on "$DEV""
+                host_or_root="$DEV"
+                ;;
+            /host)
+                debug "Wubi host partition is "$DEV""
+                host_or_root="$DEV"
+                ;;
+            *)
+                true
+                ;;
+            esac
+          ;;
+        esac
+      done < /proc/mounts
+    fi
 }
 
 #######################

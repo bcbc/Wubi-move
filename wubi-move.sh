@@ -603,6 +603,7 @@ final_questions ()
       return 0
     fi
 
+    echo ""
     if [ "$resume_prev" = "true" ]; then
       if [ "$resynch_prev" = "true" ]; then
         info "The previous migration to "$dev""
@@ -635,6 +636,7 @@ final_questions ()
       else
           info "Grub2 will be installed to "$disk""
       fi
+      echo ""
       info "Please close all open files before continuing."
       info "About to format the target partition ($dev)."
       test_YN "Proceed with format (Y/N)"
@@ -802,8 +804,8 @@ migrate_files ()
     fi
     mount_other
     echo ""
-    info "Copying files on - please be patient - this takes some time"
-    info "Copying from root (/)"
+    info "Copying files - please be patient - this takes some time"
+    info "Copying from / (root)"
     copy_files root
     info "Copying from /usr"
     copy_files usr
@@ -1145,10 +1147,9 @@ check_target ()
     if [ -n "$homedev" ]; then
       info "  Size of /home partition: $target_home_size"
     fi
-#TODO message for swapdev OK
-#    if [ -n "$swapdev" ]; then
-#      info "  Swap partition: $target_boot_size"
-#    fi
+    if [ -n "$swapdev" ]; then
+      info "  Swap partition validated"
+    fi
 }
 
 #######################
