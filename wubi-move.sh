@@ -449,7 +449,6 @@ pre_checks ()
     error "Admin rights are required to run this program."
     exit 1  # exit immediately no cleanup required
   fi
-  #TODO check for spaces in path
   local_dir="$(dirname "$(readlink /proc/$$/fd/255)")"
   check_source_script="$local_dir"/check-source.sh
   if [ ! -f "$check_source_script" ]; then
@@ -1075,7 +1074,6 @@ check_source ()
     if [ -z "$root_disk" ]; then
        result="`. "$check_source_script" ${parm}`"
     else
-#TODO confirm --root-disk= handles paths with spaces
        result="`. "$check_source_script" ${parm} --root-disk="${root_disk}" --root-mount="${root_mount}"`"
        root="$root_mount"/
     fi
