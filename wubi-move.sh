@@ -333,6 +333,7 @@ cleanup_for_exit ()
       umount "$target"/boot > /dev/null 2>&1
       sleep 3
     fi
+    sleep 5 # give things a chance to release
     if [ $(mount | grep "$target"'\ ' | wc -l) -ne 0 ]; then
       umount $target > /dev/null 2>&1
       sleep 1
@@ -528,7 +529,9 @@ sanity_checks ()
         fi
       fi
     fi
-    info "Target partition size is sufficient"
+    if [ "$edit_fail" == "false" ]; then
+      info "Target partition size is sufficient"
+    fi
 
     if [ "$grub_type" != "Grub2" ]; then
         debug "Grub-legacy detected on migration source"
@@ -563,7 +566,7 @@ sanity_checks ()
       mount $dev $target
       if [ -n "$homedev" ]; then
         mkdir -p $target/home
-        mount $target/home $homedev
+        mount $homedev $target/home
       fi
       resume_prev=true
       validate_resume_synch "--synch"
@@ -1137,13 +1140,13 @@ check_target ()
     info "Target(s) for migration validated successfully:"
     info "  Size of / partition: $target_root_size K"
     if [ -n "$bootdev" ]; then
-      info "  Size of /boot partition: $target_boot_size"
+      info "  Size of /boot partition: $target_boot_size K"
     fi
     if [ -n "$usrdev" ]; then
-      info "  Size of /usr partition: $target_usr_size"
+      info "  Size of /usr partition: $target_usr_size K"
     fi
     if [ -n "$homedev" ]; then
-      info "  Size of /home partition: $target_home_size"
+      info "  Size of /home partition: $target_home_size K"
     fi
     if [ -n "$swapdev" ]; then
       info "  Swap partition validated"
