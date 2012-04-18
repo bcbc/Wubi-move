@@ -8,8 +8,8 @@ debug=false                 # Output debug information
 keep_mounted=false          # Keep root.disk (and other .disks mounted on exit)
 rootdiskpath=               # path to root.disk file
 edit_fail=false             # set to true if edit checks failed
-
-root_mount=/tmp/wubi-move/rootdisk  # root.disk source mountpoint
+root_dir=`mktemp -d /tmp/check-sourceXXX`
+root_mount="$root_dir"/rootdisk  # root.disk source mountpoint
 
 # Bools 
 grub_legacy=false           # Is grub legacy installed?
@@ -122,6 +122,9 @@ cleanup_for_exit ()
       [ -d "$root_mount" ] && rmdir "$root_mount" > /dev/null 2>&1
      fi
     fi
+    # this is always created - remove on exit (the root_mount can be replaced,
+    # but not $root_dir)
+    [ -d "$root_dir" ] && rmdir "$root_dir" > /dev/null 2>&1
 }
 
 ### Early exit - problem detected or user canceled or

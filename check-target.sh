@@ -10,7 +10,8 @@ homedev=                    # /home device for migration
 bootdev=                    # /boot device for migration
 usrdev=                     # /usr device for migration
 edit_fail=false             # set to true if edit checks failed
-other_mount=/tmp/wubi-move/other    # used to check other target partitions
+check_target_dir=           # /tmp/check-target directory
+other_mount=                # target device mountpoint (/tmp/check-target/other)
 rc=                         # Preserve return code
 root_size=                  # size of target partition
 boot_size=                  # size of target partition
@@ -110,6 +111,7 @@ cleanup_for_exit ()
     if [ -d "$other_mount" ]; then
       rmdir "$other_mount" > /dev/null 2>&1 
     fi
+    rmdir "$check_target_dir" > /dev/null 2>&1
 }
 
 ### Early exit - problem detected or user canceled or
@@ -259,6 +261,8 @@ if [ "$(whoami)" != root ]; then
   error "Admin rights are required to run this program."
   exit_script 1
 fi
+check_target_dir=`mktemp -d /tmp/check-targetXXX`
+other_mount="$check_target_dir"/other
 check_targets
 if [ "$edit_fail" == true ]; then
   exit_script 1

@@ -47,8 +47,6 @@ source_only=false           # just check what the migration source (current inst
 
 # Literals 
 version=2.2                 # Script version
-target=/tmp/wubi-move/target        # target device mountpoint
-root_mount=/tmp/wubi-move/rootdisk  # root.disk source mountpoint
 space_buffer=400000         # minimum Kilobytes free space required on target partition(s)
 boot_space_buffer=100000    # minimum additional free space required for separate boot partition
 
@@ -61,6 +59,9 @@ suppress_chroot_output=true # Default - suppress output of chroot commands
 grub_common_exists=true     # Check for grub-common (not on 8.04)
 
 # Working variables
+wubi_move_dir=              # /tmp/wubi-move directory
+target=                     # target device mountpoint (/tmp/wubi-move/target)
+root_mount=                 # root.disk source mountpoint (/tmp/wubi-move/rootdisk)
 fs=ext4                     # Default file system - else ext3 if detected on install being migrated
 rc=                         # Preserve return code
 root="/"                    # Default root of the install being migrated
@@ -333,23 +334,18 @@ cleanup_for_exit ()
       umount "$target"/boot > /dev/null 2>&1
       sleep 3
     fi
-    sleep 5 # give things a chance to release
+    sleep 3 # give things more time to release
     if [ $(mount | grep "$target"'\ ' | wc -l) -ne 0 ]; then
       umount $target > /dev/null 2>&1
       sleep 1
     fi
     if [ -d "$target" ]; then
-      rmdir "$target" > /dev/null 2>&1 
+      rmdir "$target" > /dev/null 2>&1
     fi
+    remove_udev_rules
+    rmdir "$wubi_move_dir" > /dev/null 2>&1
 
-# other mountpoint - for checking multi-partition migrations
-    if [ $(mount | grep "$other_mount"'\ ' | wc -l) -ne 0 ]; then
-      umount $other_mount > /dev/null 2>&1
-      sleep 1
-    fi
-    if [ -d "$other_mount" ]; then
-      rmdir "$other_mount" > /dev/null 2>&1 
-    fi
+
 }
 
 ### Early exit - problem detected or user canceled or
@@ -562,7 +558,6 @@ sanity_checks ()
     # Resuming and synching are similar - no format of target partitions
     if [ "$resynch_prev" = "true" ]; then
       mkdir -p $target
-      sleep 5 # damn nautilus automount - if not disabled can prevent unmount
       mount $dev $target
       if [ -n "$homedev" ]; then
         mkdir -p $target/home
@@ -571,10 +566,10 @@ sanity_checks ()
       resume_prev=true
       validate_resume_synch "--synch"
       if [ -n "$homedev" ]; then
-        sleep 5 # damn nautilus automount - if not disabled can prevent unmount
+        sleep 3
         umount $target/home
       fi
-      sleep 5 # damn nautilus automount - if not disabled can prevent unmount
+      sleep 3
       umount $target
     fi
 
@@ -821,8 +816,10 @@ migrate_files ()
     cp -n "$HOME"/.wubi-move "$target""$HOME"/.wubi-move
     if [ "$wubi_install" = "true" ]; then
       chmod -x $target/etc/grub.d/10_lupin > /dev/null 2>&1
-    fi    
-} 
+    fi
+    # don't copy the udev rules bypass
+    rm $target/etc/udev/rules.d/wubi_move.rules > /dev/null 2>&1
+}
 
 ### Run mkswap on swap partition and enable hibernation 
 ### Note: swap must be at least as big as RAM for hibernation
@@ -1152,12 +1149,35 @@ check_target ()
       info "  Swap partition validated"
     fi
 }
-
+# Specify udev rules to hide target partitions from Nautilus etc.
+# (Stops nautilus popping up when partition is mounted)
+add_udev_rules ()
+{
+    for i in "$dev" "$homedev" "$bootdev" "$usrdev"; do
+      if [ -n "$i" ] && [ -b "$i" ]; then
+        block=${i#/dev/}
+        echo "KERNEL==\"""$block""\",ENV{UDISKS_PRESENTATION_HIDE}=\"1\"" >> "$wubi_move_dir"/wubi_move.rules
+      fi
+    done
+    cp "$wubi_move_dir"/wubi_move.rules /etc/udev/rules.d/wubi_move.rules
+    udevadm trigger > /dev/null 2>&1
+}
+remove_udev_rules ()
+{
+    rm /etc/udev/rules.d/wubi_move.rules
+    rm "$wubi_move_dir"/wubi_move.rules
+    udevadm trigger > /dev/null 2>&1
+}
 #######################
 ### Main processing ###
 #######################
 debug "Parameters passed: "$@""
+wubi_move_dir=`mktemp -d /tmp/wubi-moveXXX`
+target="$wubi_move_dir"/target
+root_mount="$wubi_move_dir"/rootdisk
+
 pre_checks
+add_udev_rules
 check_source
 check_target
 sanity_checks
