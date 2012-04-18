@@ -1079,7 +1079,7 @@ check_source ()
     fi
     if [ $? -ne 0 ]; then
         info "Validation of migration source failed"
-        exit 1
+        exit_script 1
     fi
     set $result
     install_type=$1
@@ -1126,7 +1126,7 @@ check_target ()
     result="`. "$check_target_script" ${script}`"
     if [ $? -ne 0 ]; then
         info "Validation of target(s) failed"
-        exit 1
+        exit_script 1
     fi
     set $result
     target_root_size=$1
