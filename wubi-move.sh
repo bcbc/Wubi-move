@@ -334,8 +334,8 @@ cleanup_for_exit ()
       umount "$target"/boot > /dev/null 2>&1
       sleep 3
     fi
-    sleep 3 # give things more time to release
     if [ $(mount | grep "$target"'\ ' | wc -l) -ne 0 ]; then
+      sleep 2 # give things more time to release
       umount $target > /dev/null 2>&1
       sleep 1
     fi
@@ -456,6 +456,11 @@ pre_checks ()
   if [ ! -f "$check_target_script" ]; then
     error "Script "$check_target_script" is missing"
     exit 1
+  fi
+# Since the migration can be from a live CD
+  if [ ! -z "$root_disk" ] && [ "$no_bootloader" = "true" ]; then
+    error "You cannot use --no-bootloader with --root-disk"
+    exit_script 1
   fi
 }
 
@@ -1065,6 +1070,14 @@ update_grub ()
     fi
 }
 
+# some
+check_size ()
+{
+    if [ $2 = "" ] || [ $2 -eq 0 ]; then
+      error "Error determining size of "$1". Cancelling"
+      exit_script 1
+    fi
+}
 check_source ()
 {
     info "Validating migration source..."
@@ -1098,6 +1111,11 @@ check_source ()
     else
       info "  Root partition: $host_or_root"
     fi
+    check_size "Source total size" $install_size
+    check_size "Source /boot" $boot_size
+    check_size "Source /usr" $usr_size
+    check_size "Source /home" $home_size
+
     info "  Size of install: $install_size K"
     info "  Size of /boot: $boot_size K"
     info "  Size of /usr: $usr_size K"
@@ -1134,15 +1152,19 @@ check_target ()
     target_usr_size=$3
     target_boot_size=$4
     empty=$5
+    check_size "Target" $target_root_size
     info "Target(s) for migration validated successfully:"
     info "  Size of / partition: $target_root_size K"
     if [ -n "$bootdev" ]; then
+      check_size "Target for /boot" $target_boot_size
       info "  Size of /boot partition: $target_boot_size K"
     fi
     if [ -n "$usrdev" ]; then
+      check_size "Target for /usr" $target_usr_size
       info "  Size of /usr partition: $target_usr_size K"
     fi
     if [ -n "$homedev" ]; then
+      check_size "Target for /home" $target_home_size
       info "  Size of /home partition: $target_home_size K"
     fi
     if [ -n "$swapdev" ]; then
@@ -1159,14 +1181,16 @@ add_udev_rules ()
         echo "KERNEL==\"""$block""\",ENV{UDISKS_PRESENTATION_HIDE}=\"1\"" >> "$wubi_move_dir"/wubi_move.rules
       fi
     done
-    cp "$wubi_move_dir"/wubi_move.rules /etc/udev/rules.d/wubi_move.rules
+    cp "$wubi_move_dir"/wubi_move.rules /etc/udev/rules.d/wubi_move.rules > /dev/null 2>&1
     udevadm trigger > /dev/null 2>&1
 }
 remove_udev_rules ()
 {
-    rm /etc/udev/rules.d/wubi_move.rules
-    rm "$wubi_move_dir"/wubi_move.rules
-    udevadm trigger > /dev/null 2>&1
+    if [ -f /etc/udev/rules.d/wubi_move.rules ]; then
+      rm /etc/udev/rules.d/wubi_move.rules > /dev/null 2>&1
+      rm "$wubi_move_dir"/wubi_move.rules > /dev/null 2>&1
+      udevadm trigger > /dev/null 2>&1
+    fi
 }
 #######################
 ### Main processing ###

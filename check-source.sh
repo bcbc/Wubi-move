@@ -223,11 +223,6 @@ root_disk_migration ()
         error "root disk not found: "$root_disk""
         exit_script 1
     fi
-# Since the migration can be from a live CD
-    if [ "$no_bootloader" = "true" ]; then
-        error "You cannot use --no-bootloader with --root-disk"
-        exit_script 1
-    fi
 
 # mount the root.disk and check it is a fully contained install
 # or else the /etc/fstab links to additional virtual disks and 
@@ -452,38 +447,25 @@ check_size ()
 
 # Determine host partition (or root partition if not a wubi install)
 # For a root disk migration, just set it to 'Rootdisk'
-    mtpt=
+    type="Wubi host partition is "
     if [ ! -z "$root_disk" ]; then
       host_or_root="Rootdisk"
     else
-      while read DEV MTPT FSTYPE OPTS REST; do
-        case "$DEV" in
-          /dev/sd[a-z][0-9])
-            mtpt=$MTPT
-            work=$MTPT
-            while true; do
-                work=${mtpt%/*}
-                if [ "$work" == "" ]; then
-                    break
-                fi
-                mtpt=$work
-            done
-            case $mtpt in
-            /)
-                debug "Normal install root (/) mounted on "$DEV""
-                host_or_root="$DEV"
-                ;;
-            /host)
-                debug "Wubi host partition is "$DEV""
-                host_or_root="$DEV"
-                ;;
-            *)
-                true
-                ;;
-            esac
-          ;;
-        esac
-      done < /proc/mounts
+      result=`mount | grep ' /host '`
+      set $result
+      host_or_root=$1
+    fi
+    if [ "$host_or_root" == "" ]; then
+      type="Normal install root (/) mounted on "
+      result=`mount | grep ' / '`
+      set $result
+      host_or_root=$1
+    fi
+    if [ "$host_or_root" == "" ]; then
+      debug "Problem identifying host or root partition"
+      host_or_root="Unknown"  #this isn't critical but can't be empty
+    else
+      debug ""$type""$host_or_root""
     fi
 }
 
