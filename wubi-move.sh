@@ -1194,7 +1194,7 @@ remove_udev_rules ()
     if [ -f /etc/udev/rules.d/wubi_move.rules ]; then
       rm /etc/udev/rules.d/wubi_move.rules > /dev/null 2>&1
       rm "$wubi_move_dir"/wubi_move.rules > /dev/null 2>&1
-      udevadm trigger > /dev/null 2>&1
+      udevadm trigger > /dev/null 2>&1 & # run asynchronously
     fi
 }
 #######################
