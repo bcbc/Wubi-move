@@ -46,7 +46,7 @@ edit_fail=false             # set to true if edit checks failed
 source_only=false           # just check what the migration source (current install)
 
 # Literals 
-version=2.2                 # Script version
+version=2.2.1               # Script version
 space_buffer=400000         # minimum Kilobytes free space required on target partition(s)
 boot_space_buffer=100000    # minimum additional free space required for separate boot partition
 
@@ -617,6 +617,11 @@ final_questions ()
       else
         info "The previous migration attempt to "$dev""
         info "will be resumed."
+      fi
+      if [ "$no_bootloader" = "true" ]; then
+        info "Grub2 will not be installed to "$disk""
+      else
+        info "Grub2 will be installed to "$disk""
       fi
       test_YN "Proceed (Y/N)"
     else
