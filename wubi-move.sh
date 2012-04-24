@@ -460,7 +460,7 @@ pre_checks ()
 # Since the migration can be from a live CD
   if [ ! -z "$root_disk" ] && [ "$no_bootloader" = "true" ]; then
     error "You cannot use --no-bootloader with --root-disk"
-    exit_script 1
+    exit 1
   fi
 }
 
@@ -1099,6 +1099,11 @@ check_source ()
         info "Validation of migration source failed"
         exit_script 1
     fi
+    # set doesn't look good on an empty string
+    if [ "$result" == "" ]; then
+        info "Validation of migration source failed"
+        exit_script 1
+    fi
     set $result
     install_type=$1
     grub_type=$2
@@ -1151,6 +1156,11 @@ check_target ()
         info "Validation of target(s) failed"
         exit_script 1
     fi
+    # set doesn't look good on an empty string
+    if [ "$result" == "" ]; then
+        info "Validation of target(s) failed"
+        exit_script 1
+    fi
     set $result
     target_root_size=$1
     target_home_size=$2
@@ -1197,15 +1207,23 @@ remove_udev_rules ()
       udevadm trigger > /dev/null 2>&1 & # run asynchronously
     fi
 }
+# Use mktemp to create working directories
+# chmod to allow read access to user because 
+# script runs as root
+create_working_directories ()
+{
+  wubi_move_dir=`mktemp -d /tmp/wubi-moveXXX`
+  chmod 755 $wubi_move_dir
+  target="$wubi_move_dir"/target
+  root_mount="$wubi_move_dir"/rootdisk
+}
+
 #######################
 ### Main processing ###
 #######################
 debug "Parameters passed: "$@""
-wubi_move_dir=`mktemp -d /tmp/wubi-moveXXX`
-target="$wubi_move_dir"/target
-root_mount="$wubi_move_dir"/rootdisk
-
 pre_checks
+create_working_directories
 add_udev_rules
 check_source
 check_target

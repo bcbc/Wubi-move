@@ -452,14 +452,18 @@ check_size ()
       host_or_root="Rootdisk"
     else
       result=`mount | grep ' /host '`
-      set $result
-      host_or_root=$1
+      if [ "$result" != "" ]; then
+        set $result
+        host_or_root=$1
+      fi
     fi
     if [ "$host_or_root" == "" ]; then
       type="Normal install root (/) mounted on "
       result=`mount | grep ' / '`
-      set $result
-      host_or_root=$1
+      if [ "$result" != "" ]; then
+        set $result
+        host_or_root=$1
+      fi
     fi
     if [ "$host_or_root" == "" ]; then
       debug "Problem identifying host or root partition"
