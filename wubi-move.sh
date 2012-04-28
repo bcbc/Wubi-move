@@ -1213,7 +1213,6 @@ remove_udev_rules ()
 create_working_directories ()
 {
   wubi_move_dir=`mktemp -d /tmp/wubi-moveXXX`
-  chmod 755 $wubi_move_dir
   target="$wubi_move_dir"/target
   root_mount="$wubi_move_dir"/rootdisk
 }
