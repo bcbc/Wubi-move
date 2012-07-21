@@ -52,7 +52,6 @@ boot_space_buffer=100000    # minimum additional free space required for separat
 
 # Bools 
 formatted_dev=false         # Has the target been formatted?
-grub_legacy=false           # Is grub legacy installed?
 install_grub=false          # Must the grub2 bootloader be installed?
 wubi_install=true           # Is this a Wubi install migration?
 suppress_chroot_output=true # Default - suppress output of chroot commands
@@ -69,6 +68,7 @@ host_mountpoint=            # Host mountpoint for Wubi install
 root_device=                # Device that root (/) is mounted on
 loop_file=                  # Root.disk for running Wubi install
 loop_device=                # Loop device for mounted root.disk
+grub_type=                  # Either "Grub2" or else grub-legacy is installed
 mtpt=                       # Mount point determination working variable
 target_size=                # size of target partition
 install_size=               # size of current install
@@ -1044,7 +1044,7 @@ grub_legacy()
 # and these aren't relevant on earlier installs, 1.96 for instance). 
 grub_bootloader ()
 {
-    if  [ "$grub_legacy" = "true" ]; then
+    if  [ "$grub_type" != "Grub2" ]; then
       grub_legacy
     else
       if [ "$install_grub" = "true" ]; then
@@ -1067,7 +1067,7 @@ grub_bootloader ()
 # From a grub legacy install this is left to the user to do manually
 update_grub ()
 {
-    if [ -z "$root_disk" ] && [ "$grub_legacy" = "false" ]; then
+    if [ -z "$root_disk" ] && [ "$grub_type" = "Grub2" ]; then
         echo ""
         info "Updating current grub menu to add new install..."
         sleep 1
