@@ -140,18 +140,18 @@ check_partition_type ()
     elif [ $(fdisk -l "$partition_disk" 2> /dev/null | grep -i "GPT" | grep "[ \t]ee[ \t]" | wc -l) -ne 0 ]; then
     # bypass GPT disks - doesn't apply
         true
-    elif [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]5[ \t]" | grep -i "Extended" | wc -l) -eq 1 ]; then
+    elif [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]5[ \t]" | wc -l) -eq 1 ]; then
         error "partition "$1" is an Extended partition."
-    elif [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]f[ \t]" | grep -i "W95 Ext'd (LBA)" | wc -l) -eq 1 ]; then
+    elif [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]f[ \t]" | wc -l) -eq 1 ]; then
         error "partition "$1" is an Extended partition."
-    elif [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]85[ \t]" | grep -i "Linux extended" | wc -l) -eq 1 ]; then
+    elif [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]85[ \t]" | wc -l) -eq 1 ]; then
         error "partition "$1" is an Extended partition."
     elif [ "$2" == "83" ]; then
-      if [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]"$2"[ \t]" | grep -i "Linux" | wc -l) -eq 0 ]; then
+      if [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]"$2"[ \t]" | wc -l) -eq 0 ]; then
         error "partition "$1" must be type "$2" - Linux."
       fi
     else
-      if [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]"$2"[ \t]" | grep -i "Linux swap" | wc -l) -eq 0 ]; then
+      if [ $(fdisk -l "$partition_disk" | grep "$1[ \t]" | grep "[ \t]"$2"[ \t]" | wc -l) -eq 0 ]; then
         error "partition "$1" must be type "$2" - Linux swap."
       fi
     fi
