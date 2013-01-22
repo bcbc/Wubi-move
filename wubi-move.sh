@@ -769,10 +769,10 @@ create_resumefile ()
 copy_files()
 {
     if [ "$1" == "root" ]; then
-        rsync -a --delete --one-file-system --exclude="$root"boot --exclude="$root"usr --exclude="$root"home --exclude="$root"tmp/* --exclude="$root"proc/* --exclude="$root"sys/* --exclude="$root"var/lib/lightdm/.gvfs "$root" "$target" # let errors show
+        rsync -aAX --delete --one-file-system --exclude="$root"boot --exclude="$root"usr --exclude="$root"home --exclude="$root"tmp/* --exclude="$root"proc/* --exclude="$root"sys/* --exclude="$root"var/lib/lightdm/.gvfs "$root" "$target" # let errors show
     else
         mkdir -p "$target"/"$1"
-        rsync -a --delete --one-file-system --exclude="$root"home/*/.gvfs --exclude="$root"home/*/.cache/gvfs "$root""$1" "$target" # let errors show
+        rsync -aAX --delete --one-file-system --exclude="$root"home/*/.gvfs --exclude="$root"home/*/.cache/gvfs "$root""$1" "$target" # let errors show
     fi
     rc="$?"
     if [ "$rc" -eq 24 ]; then
