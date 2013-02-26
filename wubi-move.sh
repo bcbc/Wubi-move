@@ -865,9 +865,9 @@ edit_fstab ()
 # -i replaces file (breaking symbolic links).
 
 # blank any line starting with '/' and containing '.disk'
-    sed -i 's:/.*[\.]disk .*::' $target/etc/fstab
+    sed -i 's:/.*[\.]disk[ \t].*::' $target/etc/fstab
 # blank out line starting with '/' and containing '/disks.boot'
-    sed -i 's:/.*/disks/boot .*::' $target/etc/fstab
+    sed -i 's:/.*/disks/boot[ \t].*::' $target/etc/fstab
 # blank out line starting with ' /host ' mounted (some wubi users do this)
     sed -i 's:.*[ \t]/host[ \t].*::' $target/etc/fstab
 
@@ -883,9 +883,9 @@ edit_fstab ()
 # remove the separate source mounts and then add back according to the 
 # target requirements.
     if [ "$wubi_install" = "true" ]; then
-      sed -i 's:/.*home[\.]disk .*::' $target/etc/fstab
-      sed -i 's:/.*usr[\.]disk .*::' $target/etc/fstab
-      sed -i 's:/.*boot[\.]disk .*::' $target/etc/fstab
+      sed -i 's:/.*home[\.]disk[ \t].*::' $target/etc/fstab
+      sed -i 's:/.*usr[\.]disk[ \t].*::' $target/etc/fstab
+      sed -i 's:/.*boot[\.]disk[ \t].*::' $target/etc/fstab
     else
       sed -i 's:.*[ \t]/home[ \t].*::' $target/etc/fstab
       sed -i 's:.*[ \t]/usr[ \t].*::' $target/etc/fstab
