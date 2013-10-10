@@ -1,0 +1,4 @@
+test/
+*.gpg
+MD5SUMS
+SHA256SUMS
