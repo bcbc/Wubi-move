@@ -44,9 +44,11 @@ usrdev=                     # /usr device for migration
 check_only=false            # just do checks - no changes
 edit_fail=false             # set to true if edit checks failed
 source_only=false           # just check what the migration source (current install)
+udev_rules=false            # set to true to create udev rules to prevent Nautilus
+                            # popping up when the target partition is (re)mounted
 
 # Literals 
-version=2.4                 # Script version
+version=2.5                 # Script version
 space_buffer=400000         # minimum Kilobytes free space required on target partition(s)
 boot_space_buffer=100000    # minimum additional free space required for separate boot partition
 
@@ -98,6 +100,7 @@ Migrate an ubuntu install (wubi or normal) to partition
   --resume                Resume a previous migration attempt that ended
                           due to copying errors (rsync).
   --synch                 Synchronize a previously migrated install
+  --hide-partitions       Create udev rules to prevent Nautilus popups
 EOF
 } 
 assumptions_notes () 
@@ -187,6 +190,9 @@ for option in "$@"; do
     ;;
    --migration-source)
     source_only=true
+    ;;
+   --hide-partitions)
+    udev_rules=true
     ;;
 ### undocumented debug option
     -d | --debug)
@@ -327,15 +333,17 @@ cleanup_for_exit ()
       sleep 3
     fi
     if [ $(mount | grep "$target"/usr'\ ' | wc -l) -ne 0 ]; then
+      sleep 5
       umount "$target"/usr > /dev/null 2>&1
-      sleep 3
+      sleep 1
     fi
     if [ $(mount | grep "$target"/boot'\ ' | wc -l) -ne 0 ]; then
+      sleep 5
       umount "$target"/boot > /dev/null 2>&1
-      sleep 3
+      sleep 1
     fi
     if [ $(mount | grep "$target"'\ ' | wc -l) -ne 0 ]; then
-      sleep 2 # give things more time to release
+      sleep 5
       umount $target > /dev/null 2>&1
       sleep 1
     fi
@@ -344,8 +352,6 @@ cleanup_for_exit ()
     fi
     remove_udev_rules
     rmdir "$wubi_move_dir" > /dev/null 2>&1
-
-
 }
 
 ### Early exit - problem detected or user canceled or
@@ -567,10 +573,10 @@ sanity_checks ()
       resume_prev=true
       validate_resume_synch "--synch"
       if [ -n "$homedev" ]; then
-        sleep 3
+        sleep 6
         umount $target/home
       fi
-      sleep 3
+      sleep 6
       umount $target
     fi
 
@@ -1186,6 +1192,7 @@ check_target ()
 # (Stops nautilus popping up when partition is mounted)
 add_udev_rules ()
 {
+  if [ "$udev_rules" == "true" ]; then
     for i in "$dev" "$homedev" "$bootdev" "$usrdev"; do
       if [ -n "$i" ] && [ -b "$i" ]; then
         block=${i#/dev/}
@@ -1194,6 +1201,7 @@ add_udev_rules ()
     done
     cp "$wubi_move_dir"/wubi_move.rules /etc/udev/rules.d/wubi_move.rules > /dev/null 2>&1
     udevadm trigger > /dev/null 2>&1
+  fi
 }
 remove_udev_rules ()
 {
