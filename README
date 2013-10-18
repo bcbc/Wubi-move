@@ -31,6 +31,7 @@ Migrate an ubuntu install (wubi or normal) to partition
   --resume                Resume a previous migration attempt that ended
                           due to copying errors (rsync).
   --synch                 Synchronize a previously migrated install
+  --hide-partitions       Create udev rules to prevent Nautilus popups
 
 Assumptions: 
   1. The script will detect automatically whether the current install
