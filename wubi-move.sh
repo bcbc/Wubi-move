@@ -444,6 +444,11 @@ validate_resume_synch ()
 
 pre_checks ()
 {
+  if [ "$dev" = "" ]; then
+    error "Insufficient parameters provided."
+    usage
+    exit 1  # exit immediately no cleanup required
+  fi
   if [ "$(whoami)" != root ]; then
     error "Admin rights are required to run this program."
     exit 1  # exit immediately no cleanup required
